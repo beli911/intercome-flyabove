@@ -503,15 +503,26 @@ actor LiveKitIntercomTransport: IntercomTransport {
             return local + remote
         }
 
-        let pairs = tracks
-            .compactMap(\.statistics)
-            .flatMap(\.iceCandidatePair)
+        let statistics = tracks.compactMap(\.statistics)
+        let pairs = statistics.flatMap(\.iceCandidatePair)
         guard let pair = pairs.first(where: { $0.nominated == true }) ?? pairs.first else { return }
+
+        // Loss is summed across every inbound stream rather than averaged: one
+        // badly behaved line is the thing worth surfacing, and averaging would
+        // hide it behind the healthy ones.
+        let inbound = statistics.flatMap(\.inboundRtpStream)
+        let lost = inbound.compactMap(\.packetsLost).reduce(0, +)
+        let received = inbound.compactMap(\.packetsReceived).reduce(0, +)
+        let total = Double(lost) + Double(received)
+        let lossPercent = total > 0 ? Double(lost) / total * 100 : nil
+        let jitter = inbound.compactMap(\.jitter).max().map { $0 * 1000 }
 
         emit(.statistics(IntercomStatistics(
             roundTripTimeMilliseconds: pair.currentRoundTripTime.map { $0 * 1000 },
             availableOutgoingBitrateKbps: pair.availableOutgoingBitrate.map { $0 / 1000 },
             availableIncomingBitrateKbps: pair.availableIncomingBitrate.map { $0 / 1000 },
+            packetLossPercent: lossPercent,
+            jitterMilliseconds: jitter,
             updatedAt: Date()
         )))
     }

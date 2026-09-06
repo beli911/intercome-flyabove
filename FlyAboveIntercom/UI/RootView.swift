@@ -20,13 +20,14 @@ struct RootView: View {
     enum Tab: String, CaseIterable, Identifiable {
         case lines = "VONALAK"
         case crew = "CREW"
-        case admin = "ADMIN"
+        case monitor = "MONITOR"
         case profile = "PROFIL"
 
         var id: String { rawValue }
-        /// Admin is M3; it is shown so the layout is honest about where it
-        /// will live, but it does not pretend to work.
-        var isAvailable: Bool { self != .admin }
+        /// The proposal calls this slot ADMIN, covering both monitoring and a
+        /// channel/permission editor. Only the monitoring half exists, so the
+        /// tab is named for what it does rather than for what it will hold.
+        var isAvailable: Bool { true }
     }
 
     var body: some View {
@@ -54,8 +55,12 @@ struct RootView: View {
                         onChangeProduction: onChangeProduction,
                         onSignOut: onSignOut
                     )
-                case .admin:
-                    ComingSoonPane(tab: selectedTab)
+                case .monitor:
+                    MonitorView(
+                        viewModel: viewModel,
+                        events: viewModel.events,
+                        roster: crew
+                    )
                 }
 
                 Divider().overlay(DS.line)
@@ -383,20 +388,6 @@ private struct BannerStrip: View {
             .overlay(alignment: .leading) {
                 Rectangle().frame(width: 3).foregroundStyle(rule)
             }
-    }
-}
-
-private struct ComingSoonPane: View {
-    let tab: RootView.Tab
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Spacer()
-            MonoLabel(text: tab.rawValue, size: 13, weight: .bold, color: DS.ink2)
-            MonoLabel(text: "ADMIN FELÜLET — M3", size: 11, weight: .regular, color: DS.ink3)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
     }
 }
 

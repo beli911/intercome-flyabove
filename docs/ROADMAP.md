@@ -211,10 +211,19 @@ Hátralévő:
 
 - ~~program feed és IFB/ducking~~
 - ~~private/direct call~~
+- **esemény- és minőségmonitoring.** Külön MONITOR fül: RTT, csomagvesztés,
+  jitter, aktív vonalak és kliensek, a legrosszabb kapcsolatok, és egy
+  eseménynapló időbélyeggel. A napló korlátos, csak a memóriában él, és a
+  `docs/SECURITY.md` szerinti körre szorítkozik — állapotok, hibakódok,
+  csatornanevek; se hang, se token, se hitelesítő adat.
 - ATEM tally
 - Bitfocus Companion/Stream Deck gateway
 - WHIP/WHEP vagy Dante/AES67 gateway
-- esemény- és minőségmonitoring
+- ~~esemény- és minőségmonitoring~~
+
+A maradék három külső hardvert és protokollt igényel. Meg lehet írni őket, de
+igazolni nem — és ebben a projektben eddig minden nem igazolt állítás hibásnak
+bizonyult.
 
 ## M4 – Üzembiztosság
 

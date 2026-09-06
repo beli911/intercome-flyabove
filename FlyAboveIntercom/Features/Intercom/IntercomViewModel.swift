@@ -36,6 +36,7 @@ final class IntercomViewModel: ObservableObject {
         return AppTheme(rawValue: raw) ?? .dark
     }
 
+    let events: EventLog
     private let transport: any IntercomTransport
     private let audioSession: any AudioSessionControlling
     /// Called when the server says our configuration is stale. The view model
@@ -82,11 +83,13 @@ final class IntercomViewModel: ObservableObject {
         configuration: IntercomConfiguration = .demo,
         transport: any IntercomTransport,
         audioSession: any AudioSessionControlling,
+        events: EventLog = EventLog(),
         isDeveloperModeEnabled: Bool = IntercomViewModel.defaultDeveloperMode
     ) {
         self.configuration = configuration
         self.transport = transport
         self.audioSession = audioSession
+        self.events = events
         self.isDeveloperModeEnabled = isDeveloperModeEnabled
         startObserving()
     }
@@ -218,6 +221,9 @@ final class IntercomViewModel: ObservableObject {
             audioRouteName = await audioSession.currentOutputName()
             try await transport.connect(configuration: configuration)
             connectionState = .connected
+            events.record(.connected, detail: configuration.productionName.isEmpty
+                ? nil
+                : configuration.productionName)
             // A programme feed must be at the right level from the first
             // moment, not from the first time somebody speaks.
             await updateDucking()
@@ -236,6 +242,7 @@ final class IntercomViewModel: ObservableObject {
         appliedTalk.removeAll()
         statistics = nil
         connectionState = .disconnected
+        events.record(.disconnected)
     }
 
     func toggleListening(channelID: UUID) async {
@@ -361,6 +368,7 @@ final class IntercomViewModel: ObservableObject {
     /// drastic, but an open microphone nobody can see on a live production is
     /// worse than a lost connection.
     private func forceDisconnectForUnstoppableMicrophone() async {
+        events.record(.failsafeDisconnect, severity: .error)
         errorMessage = "A mikrofon nem állt le, a kapcsolat biztonságból bontásra került."
         sessionGeneration += 1
         desiredTalk.removeAll()
@@ -456,9 +464,11 @@ final class IntercomViewModel: ObservableObject {
         switch outcome {
         case .ready:
             isMicrophoneGranted = true
+            events.record(.microphoneGranted)
             return true
         case .denied:
             isMicrophoneGranted = false
+            events.record(.microphoneDenied, severity: .warning)
             errorMessage = AudioSessionError.microphonePermissionDenied.errorDescription
             return false
         case .abandoned:
@@ -499,6 +509,18 @@ final class IntercomViewModel: ObservableObject {
 
         switch event {
         case let .connectionStateChanged(state):
+            // Only transitions are worth logging; the transport repeats the
+            // current state on every room event.
+            if state != connectionState {
+                switch state {
+                case .reconnecting: events.record(.reconnecting, severity: .warning)
+                case .connected where connectionState == .reconnecting:
+                    events.record(.connected)
+                case let .failed(message):
+                    events.record(.connectionFailed, severity: .error, detail: message)
+                default: break
+                }
+            }
             connectionState = state
             if case let .failed(message) = state { errorMessage = message }
 
@@ -513,12 +535,20 @@ final class IntercomViewModel: ObservableObject {
             Task { await updateDucking() }
 
         case let .talkStopped(channelID):
+            if configuration.channels.first(where: { $0.id == channelID })?.isTalking == true {
+                events.record(
+                    .talkStoppedBySystem,
+                    severity: .warning,
+                    detail: channelName(channelID)
+                )
+            }
             clearTalk(channelID: channelID)
 
         case let .statistics(values):
             statistics = values
 
         case let .configurationStale(version):
+            events.record(.configurationChanged, detail: "v\(version)")
             Task { await onConfigurationStale?(version) }
         }
     }
@@ -601,6 +631,7 @@ final class IntercomViewModel: ObservableObject {
     private func apply(_ event: AudioSessionEvent) async {
         switch event {
         case .interruptionBegan:
+            events.record(.interrupted, severity: .warning)
             // A call or Siri owns the microphone now. Drop Talk immediately so
             // the user is never shown as on air while nothing is transmitted.
             await stopTalkingEverywhere()
@@ -612,6 +643,9 @@ final class IntercomViewModel: ObservableObject {
             try? await audioSession.activate(recording: isMicrophoneGranted == true)
 
         case let .routeChanged(reason, outputName):
+            if outputName != audioRouteName {
+                events.record(.routeChanged, detail: outputName)
+            }
             audioRouteName = outputName
             if reason == .deviceDisconnected {
                 // Headset unplugged: audio would fall back to the speaker and
@@ -620,6 +654,7 @@ final class IntercomViewModel: ObservableObject {
             }
 
         case .mediaServicesWereReset:
+            events.record(.mediaServicesReset, severity: .error)
             // Everything below us was rebuilt; the only safe move is a full
             // reconnect.
             errorMessage = "A rendszer hangszolgáltatása újraindult, újracsatlakozás szükséges."
@@ -628,6 +663,10 @@ final class IntercomViewModel: ObservableObject {
     }
 
     // MARK: - Helpers
+
+    private func channelName(_ id: UUID) -> String? {
+        configuration.channels.first { $0.id == id }?.name
+    }
 
     private func channelIndex(for id: UUID) -> Int? {
         configuration.channels.firstIndex(where: { $0.id == id })

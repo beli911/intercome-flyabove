@@ -25,6 +25,17 @@ Engedélyezett: session ID, hibakód, kapcsolatállapot, jitter/packet loss aggr
 Alapértelmezésben tiltott: nyers audio, access token, TURN credential, teljes név
 és IP-cím hosszú távú megőrzése.
 
+## Eseménynapló
+
+A kliens vezet egy munkamenet-naplót (MONITOR fül). Ez szándékosan a fenti
+engedélyezett körre szorítkozik: kapcsolatállapotok, hibakódok, csatornanevek,
+hangútvonal és minőségi számok. Nem tartalmaz hangot, tokent, TURN
+hitelesítést és IP-címet.
+
+Korlátos (alapból 200 bejegyzés), csak a memóriában él, és a munkamenettel
+együtt elvész. Lemezre írni külön megőrzési kérdés, amit még senki nem
+válaszolt meg — addig nem írjuk le.
+
 ## Kliensoldali állapot (M1)
 
 - `AuthService`: egyszerre egy token-frissítés; `401`-re a munkamenet törlődik,

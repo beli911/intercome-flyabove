@@ -237,10 +237,36 @@ struct IntercomStatistics: Equatable, Sendable {
     var roundTripTimeMilliseconds: Double?
     var availableOutgoingBitrateKbps: Double?
     var availableIncomingBitrateKbps: Double?
+    /// Share of inbound packets that never arrived. On a voice link this is the
+    /// number that predicts "I keep missing words" better than round trip does.
+    var packetLossPercent: Double?
+    /// Worst inbound jitter across the joined lines.
+    var jitterMilliseconds: Double?
     var updatedAt: Date
+
+    init(
+        roundTripTimeMilliseconds: Double? = nil,
+        availableOutgoingBitrateKbps: Double? = nil,
+        availableIncomingBitrateKbps: Double? = nil,
+        packetLossPercent: Double? = nil,
+        jitterMilliseconds: Double? = nil,
+        updatedAt: Date
+    ) {
+        self.roundTripTimeMilliseconds = roundTripTimeMilliseconds
+        self.availableOutgoingBitrateKbps = availableOutgoingBitrateKbps
+        self.availableIncomingBitrateKbps = availableIncomingBitrateKbps
+        self.packetLossPercent = packetLossPercent
+        self.jitterMilliseconds = jitterMilliseconds
+        self.updatedAt = updatedAt
+    }
 
     var roundTripDescription: String {
         guard let roundTripTimeMilliseconds else { return "RTT –" }
         return "RTT \(Int(roundTripTimeMilliseconds.rounded())) ms"
+    }
+
+    var packetLossDescription: String {
+        guard let packetLossPercent else { return "LOSS –" }
+        return String(format: "LOSS %.1f%%", packetLossPercent)
     }
 }
