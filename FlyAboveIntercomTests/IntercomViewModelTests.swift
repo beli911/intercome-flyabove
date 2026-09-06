@@ -449,7 +449,8 @@ final class IntercomViewModelTests: XCTestCase {
             defaultListening: channel.isListening,
             participantCount: channel.participantCount,
             role: .line,
-            duckDecibels: 12
+            duckDecibels: 12,
+            isPrivate: false
         )
     }
 
@@ -522,7 +523,8 @@ final class IntercomViewModelTests: XCTestCase {
             defaultListening: true,
             participantCount: 0,
             role: .line,
-            duckDecibels: 12
+            duckDecibels: 12,
+            isPrivate: false
         )
 
         await subject.applyUpdatedChannels(
@@ -549,7 +551,8 @@ final class IntercomViewModelTests: XCTestCase {
             defaultListening: false,
             participantCount: 0,
             role: .line,
-            duckDecibels: 12
+            duckDecibels: 12,
+            isPrivate: false
         )
 
         await subject.applyUpdatedChannels(

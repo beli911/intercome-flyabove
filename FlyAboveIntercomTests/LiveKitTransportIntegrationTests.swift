@@ -407,6 +407,85 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         XCTAssertTrue(noticed, "A szerver konfigurációs broadcastja nem ért el a klienshez.")
     }
 
+    /// A private call as the client actually experiences it: a channel that
+    /// appears at both ends, carried by the configuration push.
+    func testAPrivateCallAppearsAsAChannelAndCanBeEnded() async throws {
+        try await auth.login(email: "operator@flyabove.hu", password: "flyabove")
+        let accessToken = try await auth.validAccessToken()
+        let productions = try await api.productions(accessToken: accessToken)
+        let production = try XCTUnwrap(productions.first)
+        let before = try await api.channels(productionID: production.id, accessToken: accessToken)
+
+        let crew = try await api.crew(productionID: production.id, accessToken: accessToken)
+        let currentUser = await auth.currentUser
+        let me = try XCTUnwrap(currentUser)
+        let peer = try XCTUnwrap(crew.first { $0.id != me.id })
+
+        let call = try await api.startPrivateCall(
+            productionID: production.id,
+            peerID: peer.id,
+            accessToken: accessToken
+        )
+        XCTAssertEqual(call.isPrivate, true)
+        // Named after the other person, so both ends see who they are talking to.
+        XCTAssertEqual(call.name, peer.displayName)
+        XCTAssertEqual(call.canTalk, true)
+
+        let during = try await api.channels(productionID: production.id, accessToken: accessToken)
+        XCTAssertEqual(during.count, before.count + 1)
+
+        // Asking again must join the same line, not open a second one.
+        _ = try await api.startPrivateCall(
+            productionID: production.id,
+            peerID: peer.id,
+            accessToken: accessToken
+        )
+        let again = try await api.channels(productionID: production.id, accessToken: accessToken)
+        XCTAssertEqual(again.count, during.count)
+
+        try await api.endPrivateCall(
+            productionID: production.id,
+            channelID: call.id,
+            accessToken: accessToken
+        )
+        let after = try await api.channels(productionID: production.id, accessToken: accessToken)
+        XCTAssertEqual(after.count, before.count)
+        XCTAssertFalse(after.contains { $0.id == call.id })
+    }
+
+    /// Starting a call must reach the client the same way any other channel
+    /// change does — that is the whole reason it is modelled as a channel.
+    func testAPrivateCallIsAnnouncedOverTheDataChannel() async throws {
+        let configuration = try await liveConfiguration(email: "operator@flyabove.hu")
+        let transport = LiveKitIntercomTransport(api: api, auth: auth)
+        let collector = EventCollector(stream: await transport.events())
+        try await transport.connect(configuration: configuration)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected)
+
+        let accessToken = try await auth.validAccessToken()
+        let production = try XCTUnwrap(configuration.productionID)
+        let crew = try await api.crew(productionID: production, accessToken: accessToken)
+        let currentUser = await auth.currentUser
+        let me = try XCTUnwrap(currentUser)
+        let peer = try XCTUnwrap(crew.first { $0.id != me.id })
+
+        let call = try await api.startPrivateCall(
+            productionID: production,
+            peerID: peer.id,
+            accessToken: accessToken
+        )
+        let noticed = await collector.waitForConfigurationStale(timeout: 20)
+
+        try? await api.endPrivateCall(
+            productionID: production,
+            channelID: call.id,
+            accessToken: accessToken
+        )
+        await transport.disconnect()
+        XCTAssertTrue(noticed, "A privát hívás nem került kihirdetésre a klienshez.")
+    }
+
     // MARK: - Helpers
 
     private struct DebugParticipants: Decodable {
@@ -576,6 +655,26 @@ private actor CountingAPI: IntercomAPI {
 
     func redeemInvite(code: String, accessToken: String) async throws -> ProductionSummary {
         try await wrapped.redeemInvite(code: code, accessToken: accessToken)
+    }
+
+    func startPrivateCall(
+        productionID: UUID,
+        peerID: UUID,
+        accessToken: String
+    ) async throws -> ChannelDescriptor {
+        try await wrapped.startPrivateCall(
+            productionID: productionID,
+            peerID: peerID,
+            accessToken: accessToken
+        )
+    }
+
+    func endPrivateCall(productionID: UUID, channelID: UUID, accessToken: String) async throws {
+        try await wrapped.endPrivateCall(
+            productionID: productionID,
+            channelID: channelID,
+            accessToken: accessToken
+        )
     }
 
     func realtimeTokens(

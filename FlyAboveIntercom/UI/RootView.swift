@@ -6,6 +6,10 @@ struct RootView: View {
     @ObservedObject var viewModel: IntercomViewModel
     var isDemoMode: Bool = false
     var crew: [CrewMember] = []
+    var currentUserID: UUID?
+    var isBusy = false
+    var onStartPrivateCall: ((CrewMember) async -> Void)?
+    var onEndPrivateCall: ((UUID) async -> Void)?
     var onChangeProduction: (() async -> Void)?
     var onSignOut: (() async -> Void)?
 
@@ -36,7 +40,13 @@ struct RootView: View {
                 switch selectedTab {
                 case .lines: linesTab
                 case .crew:
-                    CrewView(viewModel: viewModel, roster: crew)
+                    CrewView(
+                        viewModel: viewModel,
+                        roster: crew,
+                        currentUserID: currentUserID,
+                        onStartPrivateCall: onStartPrivateCall,
+                        isBusy: isBusy
+                    )
                 case .profile:
                     ProfileView(
                         viewModel: viewModel,
@@ -63,7 +73,11 @@ struct RootView: View {
         }
         .sheet(item: $settingsChannelID) { channelID in
             if let channel = viewModel.configuration.channels.first(where: { $0.id == channelID }) {
-                ChannelSettingsView(channel: channel, viewModel: viewModel)
+                ChannelSettingsView(
+                    channel: channel,
+                    viewModel: viewModel,
+                    onEndPrivateCall: onEndPrivateCall
+                )
             }
         }
     }

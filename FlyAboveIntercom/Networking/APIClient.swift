@@ -14,6 +14,12 @@ protocol IntercomAPI: Sendable {
     func crew(productionID: UUID, accessToken: String) async throws -> [CrewMemberDescriptor]
     func invitePreview(code: String, accessToken: String) async throws -> InvitePreview
     func redeemInvite(code: String, accessToken: String) async throws -> ProductionSummary
+    func startPrivateCall(
+        productionID: UUID,
+        peerID: UUID,
+        accessToken: String
+    ) async throws -> ChannelDescriptor
+    func endPrivateCall(productionID: UUID, channelID: UUID, accessToken: String) async throws
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -156,6 +162,30 @@ final class HTTPIntercomAPI: IntercomAPI {
             accessToken: accessToken
         )
         return response.production
+    }
+
+    private struct PeerRequest: Encodable { let peerId: UUID }
+
+    func startPrivateCall(
+        productionID: UUID,
+        peerID: UUID,
+        accessToken: String
+    ) async throws -> ChannelDescriptor {
+        try await send(
+            path: "v1/productions/\(productionID.uuidString.lowercased())/calls",
+            method: "POST",
+            body: PeerRequest(peerId: peerID),
+            accessToken: accessToken
+        )
+    }
+
+    func endPrivateCall(productionID: UUID, channelID: UUID, accessToken: String) async throws {
+        _ = try await sendRaw(
+            path: "v1/productions/\(productionID.uuidString.lowercased())/calls/\(channelID.uuidString.lowercased())",
+            method: "DELETE",
+            body: Empty?.none,
+            accessToken: accessToken
+        )
     }
 
     func realtimeTokens(

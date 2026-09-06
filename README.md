@@ -21,7 +21,8 @@ Kliensoldalon:
 - produkcióválasztó, résztvevőlista jelenléttel, csatornánkénti hangerő;
 - meghívó QR/kód és deep link; admin által küldött konfigurációváltás;
 - program feed, IFB ducking és prioritás vonal;
-- 119 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- privát hívás efemer csatornaként;
+- 121 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa

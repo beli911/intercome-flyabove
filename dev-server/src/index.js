@@ -204,9 +204,16 @@ app.get('/v1/productions/:productionId/crew', authenticate, (req, res) => {
 
 function channelDescriptor(channel, user) {
   const { canTalk, canListen } = permissionsFor(user, channel.id);
+  // A private line is named after the other person, so both ends see who they
+  // are talking to rather than a channel name neither of them chose.
+  let name = channel.name;
+  if (channel.isPrivate) {
+    const otherId = (channel.members ?? []).find((id) => id !== user.id);
+    name = findUserById(otherId)?.displayName ?? 'Privát hívás';
+  }
   return {
     id: channel.id,
-    name: channel.name,
+    name,
     detail: channel.detail,
     colorHex: channel.colorHex,
     canTalk,
@@ -215,6 +222,7 @@ function channelDescriptor(channel, user) {
     participantCount: 0,
     role: channel.role ?? 'line',
     duckDecibels: channel.duckDecibels ?? 12,
+    isPrivate: Boolean(channel.isPrivate),
   };
 }
 
@@ -297,6 +305,87 @@ app.post('/v1/invites/:code/redeem', authenticate, (req, res) => {
   // redeeming only has to report which production was joined.
   console.log(`  meghívó beváltva: ${invite.code} ← ${req.user.email}`);
   return res.json({ production });
+});
+
+// MARK: - Private calls
+//
+// A private call is an ephemeral channel, not a separate mechanism. Broadcast
+// intercoms model point-to-point exactly this way, and it means the existing
+// configuration push carries it to both ends — no ringing protocol to invent,
+// and the teardown path is the one already covered by tests.
+
+app.post('/v1/productions/:productionId/calls', authenticate, async (req, res) => {
+  const productionId = normalizeId(req.params.productionId);
+  const production = productions.find((p) => p.id === productionId);
+  if (!production) {
+    return fail(res, 404, 'production_not_found', 'Nincs ilyen produkció.');
+  }
+
+  const peerId = normalizeId(req.body?.peerId);
+  const peer = findUserById(peerId);
+  if (!peer) return fail(res, 404, 'not_found', 'Nincs ilyen felhasználó.');
+  if (peer.id === req.user.id) {
+    return fail(res, 400, 'invalid_peer', 'Magaddal nem lehet privát hívást indítani.');
+  }
+
+  const members = [req.user.id, peer.id];
+  // One line per pair: calling somebody you are already on a private line with
+  // should join that line, not open a second one.
+  const existing = channels.find(
+    (c) => c.isPrivate && (c.members ?? []).length === members.length
+      && members.every((id) => c.members.includes(id)),
+  );
+
+  const channel = existing ?? {
+    id: crypto.randomUUID(),
+    name: 'Privát hívás',
+    detail: 'Privát vonal',
+    colorHex: 'B36BFF',
+    defaultListening: true,
+    role: 'line',
+    duckDecibels: 12,
+    isPrivate: true,
+    members,
+  };
+
+  if (!existing) {
+    channels.push(channel);
+    for (const id of members) {
+      const member = findUserById(id);
+      if (member) member.permissions[channel.id] = { canTalk: true, canListen: true };
+    }
+    console.log(`  privát hívás: ${req.user.email} ↔ ${peer.email}`);
+  }
+
+  configurationVersion.value += 1;
+  await broadcastConfigurationChange(productionId);
+  return res.status(existing ? 200 : 201).json(channelDescriptor(channel, req.user));
+});
+
+app.delete('/v1/productions/:productionId/calls/:channelId', authenticate, async (req, res) => {
+  const productionId = normalizeId(req.params.productionId);
+  if (!productions.some((p) => p.id === productionId)) {
+    return fail(res, 404, 'production_not_found', 'Nincs ilyen produkció.');
+  }
+
+  const channelId = normalizeId(req.params.channelId);
+  const index = channels.findIndex((c) => c.id === channelId && c.isPrivate);
+  if (index < 0) return fail(res, 404, 'not_found', 'Nincs ilyen privát hívás.');
+
+  // Only the two people on the line may end it.
+  if (!(channels[index].members ?? []).includes(req.user.id)) {
+    return fail(res, 403, 'forbidden', 'Nem vagy résztvevője ennek a hívásnak.');
+  }
+
+  for (const id of channels[index].members ?? []) {
+    const member = findUserById(id);
+    if (member) delete member.permissions[channelId];
+  }
+  channels.splice(index, 1);
+
+  configurationVersion.value += 1;
+  await broadcastConfigurationChange(productionId);
+  return res.status(204).end();
 });
 
 // MARK: - Admin configuration

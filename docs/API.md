@@ -174,6 +174,7 @@ Minden nem 2xx válasz törzse:
 | `invite_not_found` | 404 | Nincs ilyen meghívókód |
 | `invite_expired` | 404 | A meghívó lejárt |
 | `invite_used` | 404 | A meghívót már felhasználták |
+| `invalid_peer` | 400 | Magával nem hívhat privát vonalat |
 | `rate_limited` | 429 | Túl sok kérés |
 | `internal_error` | 500 | Szerverhiba |
 
@@ -214,6 +215,32 @@ A kód megtekintése beváltás nélkül. A kód kis- és nagybetűvel is elfoga
 Válasz `200`: `{ "production": ProductionSummary }`.
 
 Hibakódok: `invite_not_found`, `invite_expired`, `invite_used`.
+
+## Privát hívás
+
+Egy privát hívás **efemer csatorna**, nem külön mechanizmus. A broadcast
+intercomok is így modellezik a point-to-pointot, és így a már meglévő
+konfigurációs push viszi el mindkét félhez: nincs csengetési protokoll, amit ki
+kellene találni, és a lebontás útja is az, amit teszt fed.
+
+### `POST /v1/productions/{productionId}/calls`
+
+```json
+{ "peerId": "…" }
+```
+
+Létrehoz egy `isPrivate: true` csatornát, amire pontosan a két félnek van
+Talk+Listen joga. Válasz `201` az új csatorna leírójával — **vagy `200`, ha már
+van vonal a két fél között**: aki olyan embert hív, akivel már beszél, arra a
+vonalra akar rálépni, nem egy másodikat nyitni.
+
+A csatorna neve **nézőpontonként más**: mindkét fél a másikét látja. Egy közösen
+választott név egyik félnek sem mondana semmit.
+
+### `DELETE /v1/productions/{productionId}/calls/{channelId}`
+
+Csak a hívás két résztvevője zárhatja le. Válasz `204`; a konfigurációs
+broadcast után a csatorna mindkét kliensről eltűnik.
 
 ## Admin által küldött konfiguráció
 

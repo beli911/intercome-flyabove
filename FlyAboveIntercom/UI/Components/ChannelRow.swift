@@ -48,6 +48,9 @@ struct ChannelRow: View {
                     .foregroundStyle(DS.ink)
                     .lineLimit(1)
 
+                if channel.isPrivate {
+                    MonoLabel(text: "PRIVÁT", size: 9, weight: .bold, color: DS.accentText)
+                }
                 if channel.isRemoteSpeaking {
                     SpeakingIndicator()
                 }
@@ -67,6 +70,11 @@ struct ChannelRow: View {
     }
 
     private var meta: String {
+        if channel.isPrivate {
+            var parts = ["privát vonal"]
+            if channel.participantCount > 0 { parts.append("\(channel.participantCount) fő") }
+            return parts.joined(separator: " · ")
+        }
         var parts = [channel.detail]
         if channel.participantCount > 0 { parts.append("\(channel.participantCount) fő") }
         if !channel.canTalk { parts.append("csak hallgatás") }

@@ -7,6 +7,10 @@ import SwiftUI
 struct CrewView: View {
     @ObservedObject var viewModel: IntercomViewModel
     let roster: [CrewMember]
+    /// Nil in demo mode, where there is nobody to call.
+    var currentUserID: UUID?
+    var onStartPrivateCall: ((CrewMember) async -> Void)?
+    var isBusy = false
 
     private var members: [CrewMember] { viewModel.crew(roster: roster) }
     private var onlineCount: Int { members.filter(\.isOnline).count }
@@ -20,7 +24,16 @@ struct CrewView: View {
                     VStack(spacing: 8) {
                         summary
                         ForEach(members) { member in
-                            CrewRow(member: member, channelName: channelName)
+                            CrewRow(
+                                member: member,
+                                channelName: channelName,
+                                privateLineName: privateLineName(for: member),
+                                canCall: canCall(member),
+                                isBusy: isBusy,
+                                onCall: onStartPrivateCall.map { call in
+                                    { Task { await call(member) } }
+                                }
+                            )
                         }
                     }
                     .padding(14)
@@ -53,11 +66,30 @@ struct CrewView: View {
     private func channelName(_ id: UUID) -> String {
         viewModel.configuration.channels.first { $0.id == id }?.name ?? "—"
     }
+
+    /// A private line is named after the other person, so a channel whose name
+    /// matches this member is the line we already have with them.
+    private func privateLineName(for member: CrewMember) -> String? {
+        viewModel.configuration.channels
+            .first { $0.isPrivate && $0.name == member.displayName }?
+            .name
+    }
+
+    private func canCall(_ member: CrewMember) -> Bool {
+        guard onStartPrivateCall != nil, viewModel.isConnected else { return false }
+        // Calling yourself is not a thing, and neither is calling somebody who
+        // is not on the line to answer.
+        return member.isOnline && member.id != currentUserID
+    }
 }
 
 private struct CrewRow: View {
     let member: CrewMember
     let channelName: (UUID) -> String
+    let privateLineName: String?
+    let canCall: Bool
+    let isBusy: Bool
+    let onCall: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -94,13 +126,28 @@ private struct CrewRow: View {
             .padding(.horizontal, 10)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            MonoLabel(
-                text: member.isOnline ? member.quality.title : "OFFLINE",
-                size: 10,
-                weight: .regular,
-                color: qualityColor
-            )
-            .padding(.trailing, 12)
+            if privateLineName != nil {
+                MonoLabel(text: "PRIVÁT", size: 10, weight: .bold, color: DS.accentText)
+                    .padding(.trailing, 12)
+            } else if canCall, let onCall {
+                Button(action: onCall) {
+                    MonoLabel(text: "HÍVÁS", size: 10, weight: .bold, color: DS.ink)
+                        .frame(width: 62)
+                        .frame(maxHeight: .infinity)
+                        .overlay { Rectangle().stroke(DS.line, lineWidth: DS.hairline) }
+                }
+                .buttonStyle(.plain)
+                .disabled(isBusy)
+                .accessibilityLabel("Privát hívás: \(member.displayName)")
+            } else {
+                MonoLabel(
+                    text: member.isOnline ? member.quality.title : "OFFLINE",
+                    size: 10,
+                    weight: .regular,
+                    color: qualityColor
+                )
+                .padding(.trailing, 12)
+            }
         }
         .frame(minHeight: 62)
         .background(DS.surface)

@@ -104,6 +104,15 @@ jogosultság-elutasítás valódi szerverrel is végigjátszható, nem csak unit
 tesztben. A megtagadás a LiveKit tokenben történik, nem a kliens jóindulatán
 múlik.
 
+## Privát hívás
+
+`POST /v1/productions/:id/calls` `{ "peerId": "…" }` létrehoz egy efemer
+csatornát a két fél között; `DELETE .../calls/:channelId` lezárja. A csatorna
+mindkét kliensen a konfigurációs broadcaston jelenik meg és tűnik el.
+
+A két seed felhasználóval végigjátszható: indítsd az egyikről, és a másik
+appjában magától megjelenik a vonal.
+
 ## Viselkedés, ami szándékos
 
 - **A refresh token egyszer használatos.** Használatkor rotálódik, a régi

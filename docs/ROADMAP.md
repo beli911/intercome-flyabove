@@ -201,10 +201,16 @@ Elkészült:
   A szabály önálló, kimerítően tesztelt függvény; a duckolás a transportban
   külön szorzó, hogy az operátor beállított szintjét ne írja felül.
 
+- **private/direct call.** Efemer csatornaként, nem külön mechanizmusként: a
+  broadcast intercomok is így modellezik a point-to-pointot, így a
+  konfigurációs push viszi el mindkét félhez, és nincs csengetési protokoll,
+  amit ki kellene találni. Párra idempotens, és a csatorna neve
+  nézőpontonként a másik fél neve.
+
 Hátralévő:
 
 - ~~program feed és IFB/ducking~~
-- private/direct call
+- ~~private/direct call~~
 - ATEM tally
 - Bitfocus Companion/Stream Deck gateway
 - WHIP/WHEP vagy Dante/AES67 gateway

@@ -565,6 +565,7 @@ final class IntercomViewModel: ObservableObject {
                 channel.canTalk = descriptor.canTalk
                 channel.canListen = descriptor.canListen
                 channel.role = descriptor.role ?? .line
+                channel.isPrivate = descriptor.isPrivate ?? false
                 channel.duckDecibels = descriptor.duckDecibels ?? 12
                 channel.isListening = existing.isListening && descriptor.canListen
                 channel.isTalking = existing.isTalking && descriptor.canTalk

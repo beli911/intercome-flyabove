@@ -9,6 +9,7 @@ import SwiftUI
 struct ChannelSettingsView: View {
     let channel: IntercomChannel
     @ObservedObject var viewModel: IntercomViewModel
+    var onEndPrivateCall: ((UUID) async -> Void)?
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -29,7 +30,17 @@ struct ChannelSettingsView: View {
                     .padding(14)
                 }
 
-                if channel.canListen {
+                if channel.isPrivate, let onEndPrivateCall {
+                    // Muting a private line makes no sense: either you are on
+                    // the call or you are not.
+                    BlockButton(title: "HÍVÁS BEFEJEZÉSE", isPrimary: true) {
+                        Task {
+                            await onEndPrivateCall(channel.id)
+                            dismiss()
+                        }
+                    }
+                    .padding(14)
+                } else if channel.canListen {
                     BlockButton(
                         title: channel.isListening ? "CSATORNA NÉMÍTÁSA" : "CSATORNA VISSZAKAPCSOLÁSA",
                         isEnabled: viewModel.isConnected
@@ -207,8 +218,8 @@ struct ChannelSettingsView: View {
             MonoLabel(text: "KÉSŐBBI MÉRFÖLDKŐ", size: 11, color: DS.ink2)
 
             VStack(alignment: .leading, spacing: 8) {
-                PendingRow(title: "Private/direct call", milestone: "M3")
                 PendingRow(title: "ATEM tally", milestone: "M3")
+                PendingRow(title: "Companion / Stream Deck", milestone: "M3")
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

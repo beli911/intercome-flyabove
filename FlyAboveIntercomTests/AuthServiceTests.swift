@@ -238,6 +238,16 @@ private actor StubAPI: IntercomAPI {
         throw APIError.http(status: 404, code: "invite_not_found", message: nil)
     }
 
+    func startPrivateCall(
+        productionID _: UUID,
+        peerID _: UUID,
+        accessToken _: String
+    ) async throws -> ChannelDescriptor {
+        throw APIError.http(status: 404, code: "not_found", message: nil)
+    }
+
+    func endPrivateCall(productionID _: UUID, channelID _: UUID, accessToken _: String) async throws {}
+
     func realtimeTokens(
         productionID _: UUID,
         channelIDs _: [UUID],

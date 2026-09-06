@@ -135,7 +135,8 @@ private actor StubAPI: IntercomAPI {
                 defaultListening: true,
                 participantCount: 0,
                 role: .line,
-                duckDecibels: 12
+                duckDecibels: 12,
+                isPrivate: false
             )
         ]
     }
@@ -149,6 +150,16 @@ private actor StubAPI: IntercomAPI {
     func redeemInvite(code _: String, accessToken _: String) async throws -> ProductionSummary {
         throw APIError.http(status: 404, code: "invite_not_found", message: nil)
     }
+
+    func startPrivateCall(
+        productionID _: UUID,
+        peerID _: UUID,
+        accessToken _: String
+    ) async throws -> ChannelDescriptor {
+        throw APIError.http(status: 404, code: "not_found", message: nil)
+    }
+
+    func endPrivateCall(productionID _: UUID, channelID _: UUID, accessToken _: String) async throws {}
 
     func realtimeTokens(
         productionID _: UUID,

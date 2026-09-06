@@ -165,6 +165,45 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
+    /// Opens a private line with one crew member.
+    ///
+    /// The channel arrives at both ends through the configuration push, so
+    /// nothing here has to tell the other person: the server does, the same way
+    /// it announces any other channel change.
+    func startPrivateCall(with member: CrewMember) async {
+        guard let api, let auth, let production = selectedProduction else { return }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+
+        do {
+            let accessToken = try await auth.validAccessToken()
+            _ = try await api.startPrivateCall(
+                productionID: production.id,
+                peerID: member.id,
+                accessToken: accessToken
+            )
+            await refreshConfiguration(productionID: production.id)
+        } catch {
+            errorMessage = error.readableMessage
+        }
+    }
+
+    func endPrivateCall(channelID: UUID) async {
+        guard let api, let auth, let production = selectedProduction else { return }
+        do {
+            let accessToken = try await auth.validAccessToken()
+            try await api.endPrivateCall(
+                productionID: production.id,
+                channelID: channelID,
+                accessToken: accessToken
+            )
+            await refreshConfiguration(productionID: production.id)
+        } catch {
+            errorMessage = error.readableMessage
+        }
+    }
+
     /// An invite link arrived from outside the app.
     ///
     /// Signed out, the code is held until there is a session to redeem it with:

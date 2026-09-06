@@ -105,6 +105,9 @@ struct ChannelDescriptor: Codable, Equatable, Identifiable, Sendable {
     /// an ordinary line.
     let role: ChannelRole?
     let duckDecibels: Double?
+    /// An ephemeral one-to-one line. Modelled as a channel on purpose: it needs
+    /// no separate mechanism, and the configuration push already delivers it.
+    let isPrivate: Bool?
 }
 
 /// A member of the production, as the server knows them. Presence is not part

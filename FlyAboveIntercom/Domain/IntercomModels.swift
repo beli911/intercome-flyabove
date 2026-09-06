@@ -37,6 +37,8 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
     var volume: Double
     /// What the channel is for; drives the ducking rules.
     var role: ChannelRole
+    /// An ephemeral one-to-one line, named after the other person.
+    var isPrivate: Bool
     /// How far this channel steps back when it is ducked.
     var duckDecibels: Double
     /// Who is on this line right now.
@@ -55,6 +57,7 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         isRemoteSpeaking: Bool = false,
         volume: Double = 1.0,
         role: ChannelRole = .line,
+        isPrivate: Bool = false,
         duckDecibels: Double = 12,
         participants: [ChannelParticipant] = []
     ) {
@@ -70,6 +73,7 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         self.isRemoteSpeaking = isRemoteSpeaking
         self.volume = volume
         self.role = role
+        self.isPrivate = isPrivate
         self.duckDecibels = duckDecibels
         self.participants = participants
     }
@@ -85,6 +89,7 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
             canTalk: descriptor.canTalk,
             canListen: descriptor.canListen,
             role: descriptor.role ?? .line,
+            isPrivate: descriptor.isPrivate ?? false,
             duckDecibels: descriptor.duckDecibels ?? 12
         )
     }

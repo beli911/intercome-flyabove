@@ -39,6 +39,10 @@ struct FlyAboveIntercomApp: App {
                             viewModel: intercom,
                             isDemoMode: environment.isDemoMode,
                             crew: environment.crew,
+                            currentUserID: environment.user?.id,
+                            isBusy: environment.isBusy,
+                            onStartPrivateCall: { await environment.startPrivateCall(with: $0) },
+                            onEndPrivateCall: { await environment.endPrivateCall(channelID: $0) },
                             onChangeProduction: environment.productions.count > 1
                                 ? { await environment.leaveProduction() }
                                 : nil,
