@@ -23,10 +23,16 @@ Kliensoldalon elkészült:
 - connection statistics és RTT overlay fejlesztői módban
 - audio interruption, route change és media-services-reset kezelés
 
-Hátralévő, szervert igénylő feladat:
+Igazolva valódi LiveKit szerverrel (`LiveKitTransportIntegrationTests`):
+csatlakozás és szobába lépés, mikrofon publikálása Talkra, publish jog nélküli
+csatorna elutasítása, és két kliens egymás látása a közös csatornán.
 
-- LiveKit telepítés vagy LiveKit Cloud projekt
-- token- és API-szerver a `docs/API.md` szerint
+Fejlesztői backend: [dev-server/](../dev-server/) — nem éles.
+
+Hátralévő feladat:
+
+- éles LiveKit telepítés vagy LiveKit Cloud projekt, TURN-nel
+- éles token- és API-szerver a `docs/API.md` szerint
 - **elfogadási feltétel:** két fizikai iPhone külön hálózatról tud PTT és nyitott
   mikrofonos beszélgetést folytatni, bontás után automatikusan újracsatlakozik
 

@@ -26,6 +26,8 @@
 		A00100000000000000000012 /* LiveKit in Frameworks */ = {isa = PBXBuildFile; productRef = 910100000000000000000001 /* LiveKit */; };
 		A00100000000000000000013 /* AppEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000015 /* AppEnvironment.swift */; };
 		A00100000000000000000014 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000016 /* LoginView.swift */; };
+		A00100000000000000000015 /* LiveKitTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000017 /* LiveKitTransportIntegrationTests.swift */; };
+		A00100000000000000000016 /* TransportEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000018 /* TransportEventTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,6 +63,8 @@
 		B00100000000000000000014 /* TokenStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TokenStoreTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000015 /* AppEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironment.swift; sourceTree = "<group>"; };
 		B00100000000000000000016 /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ../Auth/LoginView.swift; sourceTree = "<group>"; };
+		B00100000000000000000017 /* LiveKitTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveKitTransportIntegrationTests.swift; sourceTree = "<group>"; };
+		B00100000000000000000018 /* TransportEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportEventTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -85,7 +89,7 @@
 		10010000000000000000000A /* Networking */ = {isa = PBXGroup; path = Networking; sourceTree = "<group>"; children = (B0010000000000000000000E, B0010000000000000000000F); };
 		100100000000000000000006 /* Features */ = {isa = PBXGroup; path = Features/Intercom; sourceTree = "<group>"; children = (B00100000000000000000006, B00100000000000000000016); };
 		100100000000000000000007 /* UI and Resources */ = {isa = PBXGroup; sourceTree = "<group>"; children = (B00100000000000000000007, B00100000000000000000008, B00100000000000000000009, B0010000000000000000000B); };
-		100100000000000000000008 /* FlyAboveIntercomTests */ = {isa = PBXGroup; path = FlyAboveIntercomTests; sourceTree = "<group>"; children = (B0010000000000000000000A, B00100000000000000000013, B00100000000000000000014); };
+		100100000000000000000008 /* FlyAboveIntercomTests */ = {isa = PBXGroup; path = FlyAboveIntercomTests; sourceTree = "<group>"; children = (B0010000000000000000000A, B00100000000000000000013, B00100000000000000000014, B00100000000000000000017, B00100000000000000000018); };
 		100100000000000000000009 /* Products */ = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (B0010000000000000000000C, B0010000000000000000000D); };
 /* End PBXGroup section */
 
@@ -139,7 +143,7 @@
 
 /* Begin PBXSourcesBuildPhase section */
 		F00200000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000001, A00100000000000000000002, A00100000000000000000003, A00100000000000000000004, A00100000000000000000005, A00100000000000000000006, A00100000000000000000007, A00100000000000000000008, A0010000000000000000000B, A0010000000000000000000C, A0010000000000000000000D, A0010000000000000000000E, A0010000000000000000000F, A00100000000000000000013, A00100000000000000000014); runOnlyForDeploymentPostprocessing = 0; };
-		F00200000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0010000000000000000000A, A00100000000000000000010, A00100000000000000000011); runOnlyForDeploymentPostprocessing = 0; };
+		F00200000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0010000000000000000000A, A00100000000000000000010, A00100000000000000000011, A00100000000000000000015, A00100000000000000000016); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */

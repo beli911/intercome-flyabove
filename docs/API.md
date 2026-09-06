@@ -152,12 +152,18 @@ Minden nem 2xx válasz törzse:
 | `token_expired` | 401 | Lejárt vagy visszavont token |
 | `forbidden_channel` | 403 | Nincs jog a csatornához |
 | `production_not_found` | 404 | Nincs ilyen produkció, vagy nem tagja a felhasználó |
+| `not_found` | 404 | Ismeretlen végpont vagy erőforrás |
 | `rate_limited` | 429 | Túl sok kérés |
 | `internal_error` | 500 | Szerverhiba |
 
 A `message` felhasználónak mutatható, magyar nyelvű szöveg. A kliens a `401`-et
 külön kezeli (munkamenet-frissítés vagy újrabejelentkeztetés), minden mást a
 `message` megjelenítésével.
+
+## Fejlesztői referencia-implementáció
+
+A `dev-server/` könyvtárban van egy Node-alapú, memóriában dolgozó
+implementáció, kizárólag fejlesztéshez. Lásd [dev-server/README.md](../dev-server/README.md).
 
 ## Ami még nincs a szerződésben
 

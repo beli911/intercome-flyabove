@@ -23,6 +23,15 @@
 	<!-- Empty means offline demo mode: no login, no network audio. -->
 	<key>FlyAboveAPIBaseURL</key>
 	<string></string>
+	<!-- Lets the app reach a dev server on the LAN over plain HTTP. Production
+	     traffic is HTTPS/WSS, which needs no exception. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>A helyi hálózaton futó fejlesztői intercom szerver eléréséhez.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>

@@ -112,7 +112,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
         }
     }
 
-    func events() -> AsyncStream<IntercomTransportEvent> {
+    func events() async -> AsyncStream<IntercomTransportEvent> {
         let id = UUID()
         return AsyncStream { continuation in
             continuations[id] = continuation

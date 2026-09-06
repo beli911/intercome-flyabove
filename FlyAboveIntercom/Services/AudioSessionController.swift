@@ -32,14 +32,6 @@ protocol AudioSessionControlling: Sendable {
     func currentOutputName() async -> String?
 }
 
-extension AudioSessionControlling {
-    func events() async -> AsyncStream<AudioSessionEvent> {
-        AsyncStream { $0.finish() }
-    }
-
-    func currentOutputName() async -> String? { nil }
-}
-
 enum AudioSessionError: LocalizedError {
     case microphonePermissionDenied
 

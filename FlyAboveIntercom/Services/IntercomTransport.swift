@@ -23,15 +23,11 @@ protocol IntercomTransport: Sendable {
     func setTalking(_ enabled: Bool, channelID: UUID) async throws
     /// Long-lived stream of transport-originated updates. Called once per
     /// connection lifetime by the view model.
+    ///
+    /// Must be `async`: an actor implementing this with a synchronous method
+    /// silently fails to witness the requirement, and every caller then gets an
+    /// empty stream instead of a compile error.
     func events() async -> AsyncStream<IntercomTransportEvent>
-}
-
-extension IntercomTransport {
-    /// Transports that never report anything on their own (test spies, the
-    /// preview transport) do not have to implement this.
-    func events() async -> AsyncStream<IntercomTransportEvent> {
-        AsyncStream { $0.finish() }
-    }
 }
 
 enum IntercomTransportError: LocalizedError {

@@ -22,10 +22,16 @@ A LiveKit bináris frameworkjei dinamikusak, ezért a projekt
 `@executable_path/Frameworks` útvonalat. Enélkül a build sikeres, de az app
 indításkor dyld-hibával kilép — új target hozzáadásakor erre figyelj.
 
+A `LiveKitTransportIntegrationTests` valódi LiveKit szervert igényel; enélkül
+magát kihagyja. Lásd [dev-server/README.md](../dev-server/README.md).
+
 ## Projektelvek
 
 - A UI nem hív közvetlenül WebRTC vagy HTTP SDK-t.
 - Új hálózati megoldás az `IntercomTransport` implementációja legyen.
+- Az `IntercomTransport.events()` és `AudioSessionControlling.events()` `async`.
+  Actor esetén a szinkron változat nem elégíti ki a követelményt, és a hívó
+  csendben üres folyamot kapna — ezért nincs alapértelmezett implementáció.
 - Minden kapcsolatbontás állítsa le a mikrofon publikálását.
 - Titkot, API-kulcsot és TURN jelszót nem commitolunk.
 - A production URL és feature flag build configurationből, illetve az

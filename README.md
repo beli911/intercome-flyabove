@@ -15,12 +15,16 @@ Kliensoldalon:
 - bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
 - LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
 - RTT/bitráta overlay fejlesztői módban;
-- 27 unit teszt (auth, tokentárolás, view model eseménykezelés).
+- 35 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+  integrációs, utóbbi valódi LiveKit szerverrel.
 
-**Szerver nélkül nem szól.** A hang továbbításához LiveKit telepítés (vagy
-LiveKit Cloud) és a [docs/API.md](docs/API.md) szerinti token/API szerver kell.
-Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa üres, az app **demó módban**
-indul: bejelentkezés nélkül, helyi transporttal, a felületen jelzett módon.
+**Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
+üres, az app **demó módban** indul: bejelentkezés nélkül, helyi transporttal,
+a felületen jelzett módon.
+
+Fejlesztéshez a [dev-server/](dev-server/) könyvtárban van egy futtatható
+referencia-backend (LiveKit + token/API szerver), amivel a teljes lánc
+végigjátszható. Éles használatra nem alkalmas.
 
 ## Indítás
 
@@ -48,6 +52,7 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
 
 - [Architektúra](docs/ARCHITECTURE.md)
 - [API-szerződés](docs/API.md)
+- [Fejlesztői szerver](dev-server/README.md)
 - [Fejlesztési terv](docs/ROADMAP.md)
 - [Fejlesztői útmutató](docs/DEVELOPMENT.md)
 - [Biztonság és adatvédelem](docs/SECURITY.md)
