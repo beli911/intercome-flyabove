@@ -157,7 +157,7 @@ struct ProfileView: View {
 
     private var buildStamp: some View {
         MonoLabel(
-            text: "FLYABOVE INTERCOM \(Bundle.main.shortVersion)",
+            text: "FLYCOM \(Bundle.main.shortVersion)",
             size: 10,
             weight: .regular,
             color: DS.ink3

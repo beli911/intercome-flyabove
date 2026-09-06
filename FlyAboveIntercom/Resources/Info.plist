@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>hu</string>
 	<key>CFBundleDisplayName</key>
-	<string>FlyAbove Intercom</string>
+	<string>Flycom</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -49,7 +49,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A FlyAbove Intercom a produkciós kommunikációhoz használja a mikrofont.</string>
+	<string>A Flycom a produkciós kommunikációhoz használja a mikrofont.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

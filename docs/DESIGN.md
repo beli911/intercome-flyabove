@@ -1,8 +1,25 @@
 # Vizuális rendszer
 
-Forrás: „FlyAbove Intercom · mobil UX javaslat · v1" (*Broadcast pult a zsebben*).
+Forrás: „Flycom · mobil UX javaslat · v1" (*Broadcast pult a zsebben*).
 Az implementáció a [`FlyAboveIntercom/UI/DesignSystem.swift`](../FlyAboveIntercom/UI/DesignSystem.swift)
 fájlban él.
+
+## A jel
+
+Négy sáv, egy szintmérő — a hang maga, nem a mikrofon képe. Csak téglalapokból
+áll, ezért 18 ponton és hímzésben is megmarad.
+
+A sávmagasságok (24 : 40 : 56 : 32 a 96 pontos mesterben) szándékosan nem
+szabályos lépcső: egy szótag közben elkapott szintmérő hangnak látszik, egy
+szimmetrikus diagramnak.
+
+Az app ikon fordított — sárga sávok fekete alapon —, mert a telefon a
+legtöbbször sötét kezdőlapon és sötét pultban van. A felületen a jel sárga
+lapon sötét sávokkal áll.
+
+Egy forrás, két kimenet: `scripts/make-app-icon.swift` és a `FlycomMark` nézet
+ugyanazokat az arányokat használja, törtekként megadva, hogy bármilyen méretben
+azonos legyen.
 
 ## Három szabály
 

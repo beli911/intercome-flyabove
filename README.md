@@ -1,6 +1,6 @@
-# FlyAbove Intercom
+# Flycom
 
-Natív iOS produkciós intercom alkalmazás. A cél egy alacsony késleltetésű,
+A FlyAbove produkciós intercom alkalmazása iOS-re. A cél egy alacsony késleltetésű,
 többcsatornás, interneten és helyi hálózaton is használható kommunikációs rendszer.
 
 ## Jelenlegi állapot – 0.2
@@ -54,6 +54,23 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' \
   test
 ```
+
+## Név és jelölés
+
+A termék neve **Flycom**; a cég FlyAbove. A jel a „szintmérő" logóirány: négy
+sáv, ami maga a hang, nem a mikrofon képe. Csak téglalapokból áll, ezért 18
+ponton és hímzésben is megmarad.
+
+Az app ikonja fordított — sárga sávok fekete alapon —, mert a telefon a
+legtöbbször sötét kezdőlapon és sötét pultban van. Ugyanaz a rajz adja az
+ikont és a felületen látható jelet: a
+[`scripts/make-app-icon.swift`](scripts/make-app-icon.swift) és a
+[`FlycomMark`](FlyAboveIntercom/UI/FlycomMark.swift) ugyanazokat az arányokat
+használja.
+
+Az Xcode target, a bundle azonosító (`hu.flyabove.intercom`) és a repository
+neve szándékosan maradt a régi: átnevezésük provisioning profilokat, telepített
+appokat és külső hivatkozásokat törne el, és az külön döntés.
 
 ## Dokumentáció
 

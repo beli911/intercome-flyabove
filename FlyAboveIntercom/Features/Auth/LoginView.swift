@@ -37,17 +37,8 @@ struct LoginView: View {
     }
 
     private var wordmark: some View {
-        HStack(spacing: 10) {
-            MonoLabel(text: "FA", size: 15, weight: .bold, color: DS.onAccent)
-                .frame(width: 40, height: 40)
-                .background(DS.accent)
-
-            VStack(alignment: .leading, spacing: 2) {
-                MonoLabel(text: "FLYABOVE", size: 12, weight: .bold, color: DS.ink)
-                MonoLabel(text: "INTERCOM", size: 12, weight: .regular, color: DS.ink3)
-            }
-        }
-        .padding(.top, 40)
+        FlycomWordmark()
+            .padding(.top, 40)
     }
 
     private var heading: some View {
