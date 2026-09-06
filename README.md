@@ -15,9 +15,11 @@ Kliensoldalon:
 - bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
 - LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
 - RTT/bitráta overlay fejlesztői módban;
-- a mobil UX javaslat vizuális rendszere: bejelentkezés, intercom főképernyő,
-  csatorna beállítás, profil — sötét és napfény témával;
-- 79 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- a mobil UX javaslat vizuális rendszere: bejelentkezés, produkcióválasztó,
+  intercom főképernyő, crew lista, csatorna beállítás, profil — sötét és
+  napfény témával;
+- produkcióválasztó, résztvevőlista jelenléttel, csatornánkénti hangerő;
+- 92 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa

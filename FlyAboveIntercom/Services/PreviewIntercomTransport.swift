@@ -31,6 +31,10 @@ actor PreviewIntercomTransport: IntercomTransport {
         guard isConnected else { throw IntercomTransportError.notConnected }
     }
 
+    func setVolume(_: Double, channelID _: UUID) async throws {
+        guard isConnected else { throw IntercomTransportError.notConnected }
+    }
+
     func events() async -> AsyncStream<IntercomTransportEvent> {
         let id = UUID()
         return AsyncStream { continuation in

@@ -103,6 +103,14 @@ struct ChannelDescriptor: Codable, Equatable, Identifiable, Sendable {
     let participantCount: Int
 }
 
+/// A member of the production, as the server knows them. Presence is not part
+/// of this: only the realtime connection knows who actually turned up.
+struct CrewMemberDescriptor: Codable, Equatable, Identifiable, Sendable {
+    let id: UUID
+    let displayName: String
+    let role: String
+}
+
 // MARK: - Realtime
 
 /// A LiveKit join credential for exactly one channel.
@@ -141,7 +149,10 @@ struct APIErrorEnvelope: Decodable, Sendable {
 
 enum APIError: LocalizedError {
     case invalidBaseURL
-    case unauthorized
+    /// Any 401. The server's own code and message are carried along: a wrong
+    /// password and an expired session are both 401, and telling the user their
+    /// session expired when they simply mistyped is misleading.
+    case unauthorized(code: String?, message: String?)
     case http(status: Int, code: String?, message: String?)
     case transport(any Error)
     case decoding(any Error)
@@ -150,8 +161,8 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidBaseURL:
             "A szerver címe hibás."
-        case .unauthorized:
-            "A bejelentkezés lejárt, jelentkezz be újra."
+        case let .unauthorized(_, message):
+            message ?? "A bejelentkezés lejárt, jelentkezz be újra."
         case let .http(status, _, message):
             message ?? "A szerver hibát adott (HTTP \(status))."
         case let .transport(error):

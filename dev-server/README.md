@@ -64,6 +64,19 @@ környezeti változókat.
 | `LIVEKIT_API_KEY` | `devkey` | LiveKit kulcs |
 | `LIVEKIT_API_SECRET` | `secret` | LiveKit titok |
 
+## Produkciók
+
+Kettő van, hogy a produkcióválasztó egyáltalán megjelenjen: egy produkcióval a
+kliens szándékosan átlépi a választót.
+
+| Név | Szerep |
+| --- | --- |
+| Bajnokok Ligája — Puskás | operator |
+| Reggeli stúdió — 4. blokk | supervisor |
+
+A csatornák és a névsor mindkettőnél ugyanaz — ez fejlesztői egyszerűsítés,
+nem a szerződés része.
+
 ## Teszt-fiókok
 
 Jelszó mindkettőhöz: `flyabove`.

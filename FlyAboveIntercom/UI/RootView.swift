@@ -5,6 +5,8 @@ import SwiftUI
 struct RootView: View {
     @ObservedObject var viewModel: IntercomViewModel
     var isDemoMode: Bool = false
+    var crew: [CrewMember] = []
+    var onChangeProduction: (() async -> Void)?
     var onSignOut: (() async -> Void)?
 
     @State private var settingsChannelID: UUID?
@@ -18,9 +20,9 @@ struct RootView: View {
         case profile = "PROFIL"
 
         var id: String { rawValue }
-        /// Crew and admin are M2/M3; they are shown so the layout is honest
-        /// about where they will live, but they do not pretend to work.
-        var isAvailable: Bool { self == .lines || self == .profile }
+        /// Admin is M3; it is shown so the layout is honest about where it
+        /// will live, but it does not pretend to work.
+        var isAvailable: Bool { self != .admin }
     }
 
     var body: some View {
@@ -33,9 +35,16 @@ struct RootView: View {
 
                 switch selectedTab {
                 case .lines: linesTab
+                case .crew:
+                    CrewView(viewModel: viewModel, roster: crew)
                 case .profile:
-                    ProfileView(viewModel: viewModel, onSignOut: onSignOut)
-                case .crew, .admin:
+                    ProfileView(
+                        viewModel: viewModel,
+                        productionName: viewModel.configuration.productionName,
+                        onChangeProduction: onChangeProduction,
+                        onSignOut: onSignOut
+                    )
+                case .admin:
                     ComingSoonPane(tab: selectedTab)
                 }
 
@@ -64,7 +73,7 @@ struct RootView: View {
     private var header: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(viewModel.configuration.displayName)
+                Text(headerTitle)
                     .font(DS.display(15, .semibold))
                     .foregroundStyle(DS.ink)
                     .lineLimit(1)
@@ -112,6 +121,11 @@ struct RootView: View {
         .padding(.horizontal, 14)
         .padding(.top, 6)
         .padding(.bottom, 12)
+    }
+
+    private var headerTitle: String {
+        let production = viewModel.configuration.productionName
+        return production.isEmpty ? viewModel.configuration.displayName : production
     }
 
     /// The status line doubles as the developer readout: in an intercom the
@@ -360,12 +374,7 @@ private struct ComingSoonPane: View {
         VStack(spacing: 10) {
             Spacer()
             MonoLabel(text: tab.rawValue, size: 13, weight: .bold, color: DS.ink2)
-            MonoLabel(
-                text: tab == .crew ? "RÉSZTVEVŐLISTA — M2" : "ADMIN FELÜLET — M2",
-                size: 11,
-                weight: .regular,
-                color: DS.ink3
-            )
+            MonoLabel(text: "ADMIN FELÜLET — M3", size: 11, weight: .regular, color: DS.ink3)
             Spacer()
         }
         .frame(maxWidth: .infinity)

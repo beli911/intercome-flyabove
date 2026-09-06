@@ -131,7 +131,17 @@ final class IntercomViewModelTests: XCTestCase {
         let (subject, transport, _) = await makeConnectedSubject()
         let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
 
-        await transport.emit(.participantCountChanged(channelID: channelID, count: 7))
+        await transport.emit(.participantsChanged(
+            channelID: channelID,
+            participants: (0 ..< 7).map {
+                ChannelParticipant(
+                    id: "user-\($0)",
+                    displayName: "Teszt \($0)",
+                    isSpeaking: false,
+                    quality: .good
+                )
+            }
+        ))
         await transport.emit(.remoteSpeakingChanged(channelID: channelID, isSpeaking: true))
 
         await waitUntil {
@@ -158,10 +168,15 @@ final class IntercomViewModelTests: XCTestCase {
         let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
         await subject.disconnect()
 
-        await transport.emit(.participantCountChanged(channelID: channelID, count: 99))
+        await transport.emit(.participantsChanged(
+            channelID: channelID,
+            participants: [
+                ChannelParticipant(id: "x", displayName: "X", isSpeaking: false, quality: .good)
+            ]
+        ))
 
         try? await Task.sleep(for: .milliseconds(100))
-        XCTAssertNotEqual(subject.configuration.channels[0].participantCount, 99)
+        XCTAssertTrue(subject.configuration.channels[0].participants.isEmpty)
     }
 
     func testReleaseDuringAnInFlightPressStillEndsWithTheMicrophoneOff() async {
@@ -607,6 +622,9 @@ private actor TransportSpy: IntercomTransport {
     func connectCount() -> Int { connects }
     func disconnect() async { disconnects += 1 }
     func setListening(_: Bool, channelID _: UUID) async throws {}
+    private(set) var volumes: [UUID: Double] = [:]
+    func setVolume(_ volume: Double, channelID: UUID) async throws { volumes[channelID] = volume }
+    func volumeValue(_ channelID: UUID) -> Double? { volumes[channelID] }
 
     /// Suspends the next `setTalking` until `unblock()`, so a test can hold the
     /// transport open and act while a call is genuinely in flight.

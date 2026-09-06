@@ -132,6 +132,59 @@ final class IntercomViewModel: ObservableObject {
         await stopTalkingEverywhere()
     }
 
+    /// Per-channel playout gain. Unity is 1.0; the UI offers roughly -∞ to +6 dB.
+    func setVolume(_ volume: Double, channelID: UUID) async {
+        guard let index = channelIndex(for: channelID) else { return }
+        let previous = configuration.channels[index].volume
+        configuration.channels[index].volume = volume
+        do {
+            try await transport.setVolume(volume, channelID: channelID)
+        } catch {
+            configuration.channels[index].volume = previous
+            fail(with: error, preservingConnection: true)
+        }
+    }
+
+    /// The production roster merged with who the transport can actually hear.
+    ///
+    /// The API knows who belongs here; only the realtime connection knows who
+    /// turned up. A crew list built from either one alone would be wrong.
+    func crew(roster: [CrewMember]) -> [CrewMember] {
+        var presence: [String: (speaking: Bool, quality: LinkQuality, channels: [UUID])] = [:]
+        for channel in configuration.channels {
+            for participant in channel.participants {
+                var entry = presence[participant.id] ?? (false, .unknown, [])
+                entry.speaking = entry.speaking || participant.isSpeaking
+                entry.quality = max(entry.quality, participant.quality)
+                entry.channels.append(channel.id)
+                presence[participant.id] = entry
+            }
+        }
+
+        return roster.map { member in
+            var merged = member
+            if let seen = presence[member.id.uuidString.lowercased()] {
+                merged.isOnline = true
+                merged.isSpeaking = seen.speaking
+                merged.quality = seen.quality
+                merged.activeChannelIDs = seen.channels
+            } else {
+                merged.isOnline = false
+                merged.isSpeaking = false
+                merged.quality = .unknown
+                merged.activeChannelIDs = []
+            }
+            return merged
+        }
+        // Speaking first, then online, then alphabetical: the person talking is
+        // the one an operator is looking for.
+        .sorted { lhs, rhs in
+            if lhs.isSpeaking != rhs.isSpeaking { return lhs.isSpeaking }
+            if lhs.isOnline != rhs.isOnline { return lhs.isOnline }
+            return lhs.displayName < rhs.displayName
+        }
+    }
+
     /// Silences every line without leaving them, so nothing is missed on the
     /// way back.
     func setListeningOnAllChannels(_ enabled: Bool) async {
@@ -401,9 +454,10 @@ final class IntercomViewModel: ObservableObject {
             connectionState = state
             if case let .failed(message) = state { errorMessage = message }
 
-        case let .participantCountChanged(channelID, count):
+        case let .participantsChanged(channelID, participants):
             guard let index = channelIndex(for: channelID) else { return }
-            configuration.channels[index].participantCount = count
+            configuration.channels[index].participants = participants
+            configuration.channels[index].participantCount = participants.count
 
         case let .remoteSpeakingChanged(channelID, isSpeaking):
             guard let index = channelIndex(for: channelID) else { return }

@@ -4,8 +4,11 @@
 
 export const PRODUCTION_ID = '4f6f1a1e-6a4a-4a1e-9a2e-2a1b3c4d5e6f';
 
+export const SECOND_PRODUCTION_ID = '5a7a2b2f-7b5b-4b2f-8b3f-3b2c4d5e6f70';
+
 export const productions = [
-  { id: PRODUCTION_ID, name: 'Teszt produkció', role: 'operator' },
+  { id: PRODUCTION_ID, name: 'Bajnokok Ligája — Puskás', role: 'operator' },
+  { id: SECOND_PRODUCTION_ID, name: 'Reggeli stúdió — 4. blokk', role: 'supervisor' },
 ];
 
 export const channels = [
@@ -40,6 +43,7 @@ export const users = [
     email: 'operator@flyabove.hu',
     password: 'flyabove',
     displayName: 'Teszt Operátor',
+    role: 'operator',
     permissions: {
       '11111111-1111-4111-8111-111111111111': { canTalk: true, canListen: true },
       '22222222-2222-4222-8222-222222222222': { canTalk: true, canListen: true },
@@ -51,6 +55,7 @@ export const users = [
     email: 'kamera@flyabove.hu',
     password: 'flyabove',
     displayName: 'Teszt Kamera',
+    role: 'kameraman',
     permissions: {
       '11111111-1111-4111-8111-111111111111': { canTalk: true, canListen: true },
       '22222222-2222-4222-8222-222222222222': { canTalk: true, canListen: true },

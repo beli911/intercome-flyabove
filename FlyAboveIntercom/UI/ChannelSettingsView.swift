@@ -20,6 +20,7 @@ struct ChannelSettingsView: View {
 
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
+                        volumeSection
                         talkModeSection
                         permissionSection
                         pendingSection
@@ -76,6 +77,50 @@ struct ChannelSettingsView: View {
         .overlay(alignment: .bottom) {
             Rectangle().frame(height: DS.hairline).foregroundStyle(DS.line)
         }
+    }
+
+    /// Per-channel level, in the decibels an audio operator thinks in rather
+    /// than the linear gain LiveKit takes.
+    private var volumeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                MonoLabel(text: "HANGERŐ", size: 11, color: DS.ink2)
+                Spacer()
+                // Not a MonoLabel: "dB" is a unit, and uppercasing it to "DB"
+                // is wrong in a way an audio operator notices.
+                Text(ChannelVolume.label(forGain: channel.volume))
+                    .font(DS.mono(12, .bold))
+                    .tracking(DS.monoTracking)
+                    .foregroundStyle(channel.volume == 0 ? DS.live : DS.ink)
+            }
+
+            Slider(
+                value: Binding(
+                    get: { ChannelVolume.sliderPosition(forGain: channel.volume) },
+                    set: { position in
+                        Task {
+                            await viewModel.setVolume(
+                                ChannelVolume.gain(forSliderPosition: position),
+                                channelID: channel.id
+                            )
+                        }
+                    }
+                ),
+                in: 0 ... 1
+            )
+            .tint(DS.accentText)
+            .disabled(!channel.canListen)
+
+            HStack {
+                ForEach(ChannelVolume.ticks, id: \.self) { tick in
+                    MonoLabel(text: tick, size: 10, weight: .regular, color: DS.ink3)
+                    if tick != ChannelVolume.ticks.last { Spacer() }
+                }
+            }
+        }
+        .padding(12)
+        .background(DS.surface)
+        .overlay { Rectangle().stroke(DS.line, lineWidth: DS.hairline) }
     }
 
     private var talkModeSection: some View {
@@ -135,7 +180,6 @@ struct ChannelSettingsView: View {
             MonoLabel(text: "KÉSŐBBI MÉRFÖLDKŐ", size: 11, color: DS.ink2)
 
             VStack(alignment: .leading, spacing: 8) {
-                PendingRow(title: "Csatornánkénti hangerő", milestone: "M2")
                 PendingRow(title: "IFB ducking", milestone: "M3")
                 PendingRow(title: "Prioritás jelzés", milestone: "M3")
             }

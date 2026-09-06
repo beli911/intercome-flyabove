@@ -482,6 +482,10 @@ private actor CountingAPI: IntercomAPI {
         try await wrapped.channels(productionID: productionID, accessToken: accessToken)
     }
 
+    func crew(productionID: UUID, accessToken: String) async throws -> [CrewMemberDescriptor] {
+        try await wrapped.crew(productionID: productionID, accessToken: accessToken)
+    }
+
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -528,8 +532,8 @@ private actor EventCollector {
     ) async -> Bool {
         await waitFor(timeout: timeout) { events in
             events.contains { event in
-                if case let .participantCountChanged(id, count) = event {
-                    return id == channelID && count >= minimum
+                if case let .participantsChanged(id, participants) = event {
+                    return id == channelID && participants.count >= minimum
                 }
                 return false
             }
@@ -540,7 +544,7 @@ private actor EventCollector {
         events.map { event in
             switch event {
             case let .connectionStateChanged(state): "state(\(state))"
-            case let .participantCountChanged(_, count): "participants(\(count))"
+            case let .participantsChanged(_, participants): "participants(\(participants.count))"
             case let .remoteSpeakingChanged(_, speaking): "speaking(\(speaking))"
             case .talkStopped: "talkStopped"
             case .statistics: "stats"

@@ -16,12 +16,18 @@ final class AppEnvironment: ObservableObject {
         /// reached. Signing the user out here would cost them a password entry
         /// over a problem that is not theirs.
         case unavailable(message: String)
+        /// More than one production: the operator picks. With exactly one this
+        /// step is skipped — a chooser with a single row is a speed bump.
+        case choosingProduction
         case ready
     }
 
     @Published private(set) var phase: Phase = .launching
     @Published private(set) var user: AuthenticatedUser?
     @Published private(set) var intercom: IntercomViewModel?
+    @Published private(set) var productions: [ProductionSummary] = []
+    @Published private(set) var selectedProduction: ProductionSummary?
+    @Published private(set) var crew: [CrewMember] = []
     @Published private(set) var isBusy = false
     @Published var errorMessage: String?
     /// Set when `Info.plist` carries a base URL the app refuses to use.
@@ -139,26 +145,59 @@ final class AppEnvironment: ObservableObject {
         phase = .signedOut
     }
 
-    /// Loads the first production the user belongs to. Choosing between several
-    /// is M2; until then the client picks the only sensible default.
     private func loadProduction() async throws {
         guard let api, let auth else { return }
         let accessToken = try await auth.validAccessToken()
 
-        let productions = try await api.productions(accessToken: accessToken)
-        guard let production = productions.first else {
-            throw AppEnvironmentError.noProductions
-        }
+        let available = try await api.productions(accessToken: accessToken)
+        guard !available.isEmpty else { throw AppEnvironmentError.noProductions }
+        productions = available
+        user = await auth.restoredUser()
 
+        // One production is not a choice worth making the operator confirm.
+        if available.count == 1 {
+            try await enter(production: available[0])
+        } else {
+            phase = .choosingProduction
+        }
+    }
+
+    func selectProduction(_ production: ProductionSummary) async {
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+        do {
+            try await enter(production: production)
+        } catch {
+            errorMessage = error.readableMessage
+        }
+    }
+
+    /// Back to the chooser. Only offered when there is something to choose.
+    func leaveProduction() async {
+        guard productions.count > 1 else { return }
+        if let intercom { await intercom.disconnect() }
+        intercom = nil
+        selectedProduction = nil
+        crew = []
+        phase = .choosingProduction
+    }
+
+    private func enter(production: ProductionSummary) async throws {
+        guard let api, let auth else { return }
+        let accessToken = try await auth.validAccessToken()
         let descriptors = try await api.channels(productionID: production.id, accessToken: accessToken)
         let restoredUser = await auth.restoredUser()
+
         let configuration = IntercomConfiguration(
             displayName: restoredUser?.displayName ?? production.name,
+            productionName: production.name,
             productionID: production.id,
             serverURL: nil,
             channels: descriptors.map(IntercomChannel.init(descriptor:))
         )
 
+        selectedProduction = production
         user = restoredUser
         intercom = IntercomViewModel(
             configuration: configuration,
@@ -166,6 +205,31 @@ final class AppEnvironment: ObservableObject {
             audioSession: audioSession
         )
         phase = .ready
+
+        // The roster is useful even before anyone connects, and a failure to
+        // fetch it must not keep the operator off the line.
+        await loadCrew(productionID: production.id)
+    }
+
+    func loadCrew(productionID: UUID) async {
+        guard let api, let auth else { return }
+        do {
+            let accessToken = try await auth.validAccessToken()
+            let descriptors = try await api.crew(productionID: productionID, accessToken: accessToken)
+            crew = descriptors.map {
+                CrewMember(
+                    id: $0.id,
+                    displayName: $0.displayName,
+                    role: $0.role,
+                    isOnline: false,
+                    isSpeaking: false,
+                    quality: .unknown,
+                    activeChannelIDs: []
+                )
+            }
+        } catch {
+            crew = []
+        }
     }
 }
 

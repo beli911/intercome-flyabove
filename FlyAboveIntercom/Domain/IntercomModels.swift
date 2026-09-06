@@ -32,6 +32,11 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
     var canListen: Bool
     /// Someone other than us is currently speaking on this channel.
     var isRemoteSpeaking: Bool
+    /// Playout gain, 1.0 being unity. Per-channel level is how an operator
+    /// keeps the director audible under a busy camera line.
+    var volume: Double
+    /// Who is on this line right now.
+    var participants: [ChannelParticipant]
 
     init(
         id: UUID = UUID(),
@@ -43,7 +48,9 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         participantCount: Int = 0,
         canTalk: Bool = true,
         canListen: Bool = true,
-        isRemoteSpeaking: Bool = false
+        isRemoteSpeaking: Bool = false,
+        volume: Double = 1.0,
+        participants: [ChannelParticipant] = []
     ) {
         self.id = id
         self.name = name
@@ -55,6 +62,8 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         self.canTalk = canTalk
         self.canListen = canListen
         self.isRemoteSpeaking = isRemoteSpeaking
+        self.volume = volume
+        self.participants = participants
     }
 
     init(descriptor: ChannelDescriptor) {
@@ -73,6 +82,8 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
 
 struct IntercomConfiguration: Equatable, Sendable {
     var displayName: String
+    var productionName: String = ""
+
     /// Nil until a production is selected (M2); the realtime transport cannot
     /// mint tokens without it.
     var productionID: UUID?
@@ -81,11 +92,13 @@ struct IntercomConfiguration: Equatable, Sendable {
 
     init(
         displayName: String,
+        productionName: String = "",
         productionID: UUID? = nil,
         serverURL: URL?,
         channels: [IntercomChannel]
     ) {
         self.displayName = displayName
+        self.productionName = productionName
         self.productionID = productionID
         self.serverURL = serverURL
         self.channels = channels
@@ -124,6 +137,61 @@ enum TalkMode: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .momentary: "Tartsd nyomva. Felengedve azonnal zár."
         case .latch: "Koppintásra beragad, újra koppintásra zár."
+        }
+    }
+}
+
+/// How well one participant's link is holding up.
+enum LinkQuality: Int, Comparable, Sendable {
+    case unknown = 0
+    case lost
+    case poor
+    case good
+    case excellent
+
+    static func < (lhs: LinkQuality, rhs: LinkQuality) -> Bool { lhs.rawValue < rhs.rawValue }
+
+    var title: String {
+        switch self {
+        case .unknown: "—"
+        case .lost: "MEGSZAKADT"
+        case .poor: "GYENGE"
+        case .good: "JÓ"
+        case .excellent: "KIVÁLÓ"
+        }
+    }
+}
+
+/// Somebody the transport can see on a channel right now.
+struct ChannelParticipant: Identifiable, Equatable, Sendable {
+    /// The server-issued user id, as LiveKit identity.
+    let id: String
+    var displayName: String
+    var isSpeaking: Bool
+    var quality: LinkQuality
+}
+
+/// A member of the production, whether or not they are connected.
+///
+/// Two sources meet here: the roster comes from the API (who belongs to this
+/// production and in what role), presence comes from the realtime transport
+/// (who is actually on a line, and who is talking). Neither alone is the crew.
+struct CrewMember: Identifiable, Equatable, Sendable {
+    let id: UUID
+    var displayName: String
+    var role: String
+    var isOnline: Bool
+    var isSpeaking: Bool
+    var quality: LinkQuality
+    /// Channels this person is currently heard on.
+    var activeChannelIDs: [UUID]
+
+    var initials: String {
+        let words = displayName.split(separator: " ")
+        switch words.count {
+        case 0: return "??"
+        case 1: return String(words[0].prefix(2)).uppercased()
+        default: return String(words.prefix(2).compactMap(\.first)).uppercased()
         }
     }
 }

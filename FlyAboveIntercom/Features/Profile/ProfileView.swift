@@ -3,12 +3,15 @@ import SwiftUI
 /// Profile and settings, trimmed to what the client can honestly change today.
 struct ProfileView: View {
     @ObservedObject var viewModel: IntercomViewModel
+    var productionName: String = ""
+    var onChangeProduction: (() async -> Void)?
     var onSignOut: (() async -> Void)?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 identity
+                if !productionName.isEmpty { productionSection }
                 audioSection
                 displaySection
                 if onSignOut != nil { accountSection }
@@ -47,6 +50,23 @@ struct ProfileView: View {
         // A single-word display name still deserves a two-letter badge.
         case 1: return String(words[0].prefix(2)).uppercased()
         default: return String(words.prefix(2).compactMap(\.first)).uppercased()
+        }
+    }
+
+    private var productionSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MonoLabel(text: "PRODUKCIÓ", size: 11, color: DS.ink2)
+            VStack(spacing: 0) {
+                InfoRow(title: "Aktuális", value: productionName)
+            }
+            .background(DS.surface)
+            .overlay { Rectangle().stroke(DS.line, lineWidth: DS.hairline) }
+
+            if let onChangeProduction {
+                BlockButton(title: "PRODUKCIÓ VÁLTÁSA") {
+                    Task { await onChangeProduction() }
+                }
+            }
         }
     }
 

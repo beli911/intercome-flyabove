@@ -76,7 +76,7 @@ final class AuthServiceTests: XCTestCase {
 
     func testRejectedRefreshClearsStoredSession() async throws {
         let api = StubAPI()
-        await api.setRefreshResult(.failure(APIError.unauthorized))
+        await api.setRefreshResult(.failure(APIError.unauthorized(code: nil, message: nil)))
         let store = InMemoryTokenStore()
         let clock = Clock(value: epoch)
         let subject = makeService(api: api, store: store, now: { clock.value })
@@ -227,6 +227,8 @@ private actor StubAPI: IntercomAPI {
     func productions(accessToken _: String) async throws -> [ProductionSummary] { [] }
 
     func channels(productionID _: UUID, accessToken _: String) async throws -> [ChannelDescriptor] { [] }
+
+    func crew(productionID _: UUID, accessToken _: String) async throws -> [CrewMemberDescriptor] { [] }
 
     func realtimeTokens(
         productionID _: UUID,

@@ -26,7 +26,8 @@ enum ConnectionAggregation {
 /// Something the transport learned on its own, without the UI asking.
 enum IntercomTransportEvent: Sendable {
     case connectionStateChanged(ConnectionState)
-    case participantCountChanged(channelID: UUID, count: Int)
+    /// Everyone the transport can currently see on a channel, us included.
+    case participantsChanged(channelID: UUID, participants: [ChannelParticipant])
     case remoteSpeakingChanged(channelID: UUID, isSpeaking: Bool)
     /// The server dropped our publish permission, or the local track died; the
     /// UI must release the Talk button.
@@ -44,6 +45,8 @@ protocol IntercomTransport: Sendable {
     func disconnect() async
     func setListening(_ enabled: Bool, channelID: UUID) async throws
     func setTalking(_ enabled: Bool, channelID: UUID) async throws
+    /// Playout gain for one channel, 1.0 being unity.
+    func setVolume(_ volume: Double, channelID: UUID) async throws
     /// Long-lived stream of transport-originated updates. Called once per
     /// connection lifetime by the view model.
     ///

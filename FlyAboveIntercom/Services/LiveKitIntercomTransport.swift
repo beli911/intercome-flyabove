@@ -38,6 +38,9 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// can decide the room's fate.
     private var wantsListening: Set<UUID> = []
     private var wantsTalking: Set<UUID> = []
+    /// Per-channel playout gain. Kept here because a room that is left and
+    /// re-joined would otherwise come back at unity and undo the operator's mix.
+    private var volumes: [UUID: Double] = [:]
     /// Per-room connection state. One channel reconnecting must not be masked
     /// by another reporting `.connected`.
     private var roomStates: [UUID: RoomLinkState] = [:]
@@ -168,6 +171,21 @@ actor LiveKitIntercomTransport: IntercomTransport {
         await leave(channelID: channelID)
     }
 
+    func setVolume(_ volume: Double, channelID: UUID) async throws {
+        volumes[channelID] = volume
+        applyVolume(channelID: channelID)
+    }
+
+    private func applyVolume(channelID: UUID) {
+        guard let session = sessions[channelID] else { return }
+        let volume = volumes[channelID] ?? 1.0
+        for participant in session.room.remoteParticipants.values {
+            for publication in participant.audioTracks {
+                (publication.track as? RemoteAudioTrack)?.volume = volume
+            }
+        }
+    }
+
     func events() async -> AsyncStream<IntercomTransportEvent> {
         let id = UUID()
         return AsyncStream { continuation in
@@ -244,7 +262,8 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
         sessions[channelID] = ChannelSession(room: room, observer: observer, grant: grant)
         roomStates[channelID] = RoomLinkState(room.connectionState)
-        emit(.participantCountChanged(channelID: channelID, count: room.remoteParticipants.count + 1))
+        applyVolume(channelID: channelID)
+        emitParticipants(channelID: channelID)
     }
 
     private func leave(channelID: UUID) async {
@@ -257,7 +276,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
         roomStates.removeValue(forKey: channelID)
         guard let session = sessions.removeValue(forKey: channelID) else { return }
         await session.room.disconnect()
-        emit(.participantCountChanged(channelID: channelID, count: 0))
+        emit(.participantsChanged(channelID: channelID, participants: []))
         emit(.remoteSpeakingChanged(channelID: channelID, isSpeaking: false))
     }
 
@@ -266,6 +285,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
         // not look like a drop worth recovering from.
         wantsListening.removeAll()
         wantsTalking.removeAll()
+        volumes.removeAll()
         for task in recoveryTasks.values { task.cancel() }
         recoveryTasks.removeAll()
 
@@ -310,9 +330,13 @@ actor LiveKitIntercomTransport: IntercomTransport {
                 scheduleRecovery(channelID: channelID)
             }
             emit(.connectionStateChanged(aggregatedConnectionState()))
-        case let .participantCount(count):
-            emit(.participantCountChanged(channelID: channelID, count: count))
+        case .participantsChanged:
+            // A newly subscribed track starts at unity gain, so the operator's
+            // level has to be re-applied whenever the roster moves.
+            applyVolume(channelID: channelID)
+            emitParticipants(channelID: channelID)
         case let .remoteSpeaking(isSpeaking):
+            emitParticipants(channelID: channelID)
             emit(.remoteSpeakingChanged(channelID: channelID, isSpeaking: isSpeaking))
         case .localAudioUnpublished:
             emit(.talkStopped(channelID: channelID))
@@ -321,6 +345,32 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
     private func aggregatedConnectionState() -> ConnectionState {
         ConnectionAggregation.state(from: Array(roomStates.values))
+    }
+
+    private func emitParticipants(channelID: UUID) {
+        guard let session = sessions[channelID] else { return }
+        let room = session.room
+
+        var participants = room.remoteParticipants.values.map { participant in
+            ChannelParticipant(
+                id: participant.identity?.stringValue ?? "",
+                displayName: participant.name ?? participant.identity?.stringValue ?? "—",
+                isSpeaking: participant.isSpeaking,
+                quality: LinkQuality(participant.connectionQuality)
+            )
+        }
+        let local = room.localParticipant
+        participants.append(ChannelParticipant(
+            id: local.identity?.stringValue ?? "",
+            displayName: local.name ?? "—",
+            isSpeaking: local.isSpeaking,
+            quality: LinkQuality(local.connectionQuality)
+        ))
+
+        emit(.participantsChanged(
+            channelID: channelID,
+            participants: participants.sorted { $0.displayName < $1.displayName }
+        ))
     }
 
     private func removeContinuation(_ id: UUID) {
@@ -456,7 +506,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
 /// a plain value ever crosses the boundary.
 private enum RoomSignal: Sendable {
     case connectionState(LiveKit.ConnectionState)
-    case participantCount(Int)
+    case participantsChanged
     case remoteSpeaking(Bool)
     case localAudioUnpublished
 }
@@ -478,12 +528,20 @@ private final class RoomObserver: NSObject, RoomDelegate, @unchecked Sendable {
         handler(channelID, .connectionState(connectionState))
     }
 
-    func room(_ room: Room, participantDidConnect _: RemoteParticipant) {
-        handler(channelID, .participantCount(room.remoteParticipants.count + 1))
+    func room(_: Room, participantDidConnect _: RemoteParticipant) {
+        handler(channelID, .participantsChanged)
     }
 
-    func room(_ room: Room, participantDidDisconnect _: RemoteParticipant) {
-        handler(channelID, .participantCount(room.remoteParticipants.count + 1))
+    func room(_: Room, participantDidDisconnect _: RemoteParticipant) {
+        handler(channelID, .participantsChanged)
+    }
+
+    func room(_: Room, participant _: RemoteParticipant, didSubscribeTrack _: RemoteTrackPublication) {
+        handler(channelID, .participantsChanged)
+    }
+
+    func room(_: Room, participant _: Participant, didUpdateConnectionQuality _: ConnectionQuality) {
+        handler(channelID, .participantsChanged)
     }
 
     func room(_: Room, didUpdateSpeakingParticipants participants: [Participant]) {
@@ -504,6 +562,20 @@ private extension RoomLinkState {
         case .reconnecting: self = .reconnecting
         case .disconnected, .disconnecting: self = .disconnected
         @unknown default: self = .disconnected
+        }
+    }
+}
+
+
+private extension LinkQuality {
+    init(_ quality: ConnectionQuality) {
+        switch quality {
+        case .excellent: self = .excellent
+        case .good: self = .good
+        case .poor: self = .poor
+        case .lost: self = .lost
+        case .unknown: self = .unknown
+        @unknown default: self = .unknown
         }
     }
 }

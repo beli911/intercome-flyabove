@@ -11,6 +11,7 @@ protocol IntercomAPI: Sendable {
     func logout(accessToken: String) async throws
     func productions(accessToken: String) async throws -> [ProductionSummary]
     func channels(productionID: UUID, accessToken: String) async throws -> [ChannelDescriptor]
+    func crew(productionID: UUID, accessToken: String) async throws -> [CrewMemberDescriptor]
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -127,6 +128,15 @@ final class HTTPIntercomAPI: IntercomAPI {
         )
     }
 
+    func crew(productionID: UUID, accessToken: String) async throws -> [CrewMemberDescriptor] {
+        try await send(
+            path: "v1/productions/\(productionID.uuidString.lowercased())/crew",
+            method: "GET",
+            body: Empty?.none,
+            accessToken: accessToken
+        )
+    }
+
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -191,8 +201,13 @@ final class HTTPIntercomAPI: IntercomAPI {
             throw APIError.http(status: -1, code: nil, message: nil)
         }
         guard (200 ..< 300).contains(http.statusCode) else {
-            if http.statusCode == 401 { throw APIError.unauthorized }
             let envelope = try? JSONDecoder.intercom.decode(APIErrorEnvelope.self, from: data)
+            if http.statusCode == 401 {
+                throw APIError.unauthorized(
+                    code: envelope?.error.code,
+                    message: envelope?.error.message
+                )
+            }
             throw APIError.http(
                 status: http.statusCode,
                 code: envelope?.error.code,

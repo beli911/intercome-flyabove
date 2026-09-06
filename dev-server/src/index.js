@@ -15,6 +15,7 @@ import {
   findUserById,
   productions,
   roomName,
+  users,
 } from './data.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
@@ -173,6 +174,20 @@ app.get('/v1/productions/:productionId/channels', authenticate, (req, res) => {
     .filter((channel) => channel.canTalk || channel.canListen);
 
   return res.json(payload);
+});
+
+app.get('/v1/productions/:productionId/crew', authenticate, (req, res) => {
+  const production = productions.find((p) => p.id === normalizeId(req.params.productionId));
+  if (!production) {
+    return fail(res, 404, 'production_not_found', 'Nincs ilyen produkció.');
+  }
+  // The roster, not presence: who is actually connected is something only the
+  // realtime layer can answer.
+  return res.json(users.map((user) => ({
+    id: user.id,
+    displayName: user.displayName,
+    role: user.role ?? 'operator',
+  })));
 });
 
 // MARK: - Realtime

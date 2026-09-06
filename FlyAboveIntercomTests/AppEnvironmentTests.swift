@@ -52,7 +52,7 @@ final class AppEnvironmentTests: XCTestCase {
 
     func testRejectedCredentialsAtLaunchClearTheSession() async {
         let api = StubAPI()
-        await api.setProductionsResult(.failure(APIError.unauthorized))
+        await api.setProductionsResult(.failure(APIError.unauthorized(code: nil, message: nil)))
         let store = storedSession()
         let subject = makeEnvironment(api: api, store: store)
 
@@ -110,11 +110,11 @@ private actor StubAPI: IntercomAPI {
     }
 
     func login(email: String, password _: String, deviceName _: String) async throws -> AuthSessionResponse {
-        throw APIError.unauthorized
+        throw APIError.unauthorized(code: nil, message: nil)
     }
 
     func refresh(refreshToken _: String) async throws -> AuthSessionResponse {
-        throw APIError.unauthorized
+        throw APIError.unauthorized(code: nil, message: nil)
     }
 
     func logout(accessToken _: String) async throws {}
@@ -137,6 +137,8 @@ private actor StubAPI: IntercomAPI {
             )
         ]
     }
+
+    func crew(productionID _: UUID, accessToken _: String) async throws -> [CrewMemberDescriptor] { [] }
 
     func realtimeTokens(
         productionID _: UUID,

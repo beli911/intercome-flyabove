@@ -12,6 +12,11 @@ struct FlyAboveIntercomApp: App {
                     ProgressView("Indulás…")
                 case .signedOut:
                     LoginView(environment: environment)
+                case .choosingProduction:
+                    ProductionPickerView(
+                        environment: environment,
+                        onSignOut: { await environment.signOut() }
+                    )
                 case let .unavailable(message):
                     UnavailableView(message: message) {
                         await environment.retryBootstrap()
@@ -21,6 +26,10 @@ struct FlyAboveIntercomApp: App {
                         RootView(
                             viewModel: intercom,
                             isDemoMode: environment.isDemoMode,
+                            crew: environment.crew,
+                            onChangeProduction: environment.productions.count > 1
+                                ? { await environment.leaveProduction() }
+                                : nil,
                             // No session in demo mode, so nothing to sign out of.
                             onSignOut: environment.isDemoMode
                                 ? nil
