@@ -15,7 +15,9 @@ Kliensoldalon:
 - bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
 - LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
 - RTT/bitráta overlay fejlesztői módban;
-- 44 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- a mobil UX javaslat vizuális rendszere: bejelentkezés, intercom főképernyő,
+  csatorna beállítás, profil — sötét és napfény témával;
+- 49 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
@@ -52,6 +54,7 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
 
 - [Architektúra](docs/ARCHITECTURE.md)
 - [API-szerződés](docs/API.md)
+- [Vizuális rendszer](docs/DESIGN.md)
 - [Fejlesztői szerver](dev-server/README.md)
 - [Fejlesztési terv](docs/ROADMAP.md)
 - [Fejlesztői útmutató](docs/DEVELOPMENT.md)

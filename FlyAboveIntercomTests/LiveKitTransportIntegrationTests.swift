@@ -103,7 +103,8 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         let collector = EventCollector(stream: await transport.events())
 
         try await transport.connect(configuration: configuration)
-        await collector.waitForConnected(timeout: 20)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected, "Nem érkezett .connected esemény.")
 
         let talkChannel = try XCTUnwrap(configuration.channels.first { $0.canTalk })
         do {
@@ -125,7 +126,8 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         let collector = EventCollector(stream: await transport.events())
 
         try await transport.connect(configuration: configuration)
-        await collector.waitForConnected(timeout: 20)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected, "Nem érkezett .connected esemény.")
 
         let director = try XCTUnwrap(configuration.channels.first { !$0.canTalk })
         do {
@@ -149,7 +151,8 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         let firstTransport = LiveKitIntercomTransport(api: api, auth: auth)
         let firstEvents = EventCollector(stream: await firstTransport.events())
         try await firstTransport.connect(configuration: firstConfiguration)
-        await firstEvents.waitForConnected(timeout: 20)
+        let firstConnected = await firstEvents.waitForConnected(timeout: 20)
+        XCTAssertTrue(firstConnected, "Az első kliens nem csatlakozott.")
 
         let secondAuth = AuthService(
             api: api,
@@ -161,7 +164,8 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         let secondTransport = LiveKitIntercomTransport(api: api, auth: secondAuth)
         let secondEvents = EventCollector(stream: await secondTransport.events())
         try await secondTransport.connect(configuration: secondConfiguration)
-        await secondEvents.waitForConnected(timeout: 20)
+        let secondConnected = await secondEvents.waitForConnected(timeout: 20)
+        XCTAssertTrue(secondConnected, "A második kliens nem csatlakozott.")
 
         let sharedChannel = try XCTUnwrap(firstConfiguration.channels.first {
             $0.name == "Mindenki"
@@ -254,8 +258,9 @@ private actor EventCollector {
 
     private func append(_ event: IntercomTransportEvent) { events.append(event) }
 
-    func waitForConnected(timeout: TimeInterval) async {
-        _ = await waitFor(timeout: timeout) { events in
+    @discardableResult
+    func waitForConnected(timeout: TimeInterval) async -> Bool {
+        await waitFor(timeout: timeout) { events in
             events.contains { event in
                 if case .connectionStateChanged(.connected) = event { return true }
                 return false

@@ -19,17 +19,66 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertTrue(didActivate)
     }
 
-    func testDeniedPermissionDoesNotConnect() async {
+    func testConnectingDoesNotAskForTheMicrophone() async {
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(transport: TransportSpy(), audioSession: audio)
+
+        await subject.connect()
+
+        // Listening needs no microphone, so nothing should be asked for yet.
+        let asked = await audio.permissionRequestCount()
+        XCTAssertEqual(asked, 0)
+        XCTAssertNil(subject.isMicrophoneGranted)
+        let recordingModes = await audio.activateRecordingModes()
+        XCTAssertEqual(recordingModes, [false])
+    }
+
+    func testDeniedMicrophoneStillAllowsListening() async {
         let transport = TransportSpy()
         let audio = AudioSessionSpy(permissionGranted: false)
         let subject = IntercomViewModel(transport: transport, audioSession: audio)
 
         await subject.connect()
 
-        XCTAssertFalse(subject.isConnected)
-        XCTAssertNotNil(subject.errorMessage)
+        // A listen-only operator who refuses the microphone must still get on
+        // the line — refusing it is not a reason to lock them out of the show.
+        XCTAssertTrue(subject.isConnected)
         let didConnect = await transport.connectedValue()
-        XCTAssertFalse(didConnect)
+        XCTAssertTrue(didConnect)
+    }
+
+    func testDeniedMicrophoneBlocksTalkWithAMessage() async {
+        let transport = TransportSpy()
+        let audio = AudioSessionSpy(permissionGranted: false)
+        let subject = IntercomViewModel(transport: transport, audioSession: audio)
+        await subject.connect()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        await subject.setTalking(true, channelID: channelID)
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        XCTAssertEqual(subject.isMicrophoneGranted, false)
+        XCTAssertNotNil(subject.errorMessage)
+        let talkCalls = await transport.talkCallsValue()
+        XCTAssertTrue(talkCalls.isEmpty, "Engedély nélkül nem szabad publikálni.")
+    }
+
+    func testMicrophoneIsAskedForOnceOnFirstTalk() async {
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(transport: TransportSpy(), audioSession: audio)
+        await subject.connect()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        await subject.setTalking(true, channelID: channelID)
+        await subject.setTalking(false, channelID: channelID)
+        await subject.setTalking(true, channelID: channelID)
+
+        let asked = await audio.permissionRequestCount()
+        XCTAssertEqual(asked, 1)
+        XCTAssertEqual(subject.isMicrophoneGranted, true)
+        // Playback-only for listening, then the record category once we speak.
+        let recordingModes = await audio.activateRecordingModes()
+        XCTAssertEqual(recordingModes, [false, true])
     }
 
     func testDisconnectStopsAllTalkChannels() async {
@@ -115,22 +164,57 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertNotEqual(subject.configuration.channels[0].participantCount, 99)
     }
 
-    func testRapidTalkTogglesEndWithTheMicrophoneOff() async {
+    func testReleaseDuringAnInFlightPressStillEndsWithTheMicrophoneOff() async {
         let (subject, transport, _) = await makeConnectedSubject()
         let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
-        // The transport is slow enough that unserialised tasks would finish out
-        // of order, which is exactly what a press-and-drag used to produce.
-        await transport.setTalkDelay(.milliseconds(30))
 
-        async let first: Void = subject.setTalking(true, channelID: channelID)
-        async let second: Void = subject.setTalking(true, channelID: channelID)
-        async let third: Void = subject.setTalking(false, channelID: channelID)
-        _ = await (first, second, third)
+        // Hold the transport inside the "start talking" call, then release the
+        // button while it is genuinely still in there. Deterministic: the test
+        // waits for the call to be in flight instead of hoping for a schedule.
+        await transport.blockNextTalkCall()
+        subject.requestTalking(true, channelID: channelID)
+        let entered = await transport.waitUntilBlocked()
+        XCTAssertTrue(entered, "A transport hívás nem indult el.")
+
+        subject.requestTalking(false, channelID: channelID)
+
+        await transport.unblock()
+        await subject.waitForTalkWorkToSettle()
 
         XCTAssertEqual(subject.activeTalkChannelCount, 0)
         let calls = await transport.talkCallsValue()
-        XCTAssertEqual(calls.last?.enabled, false, "A mikrofon bekapcsolva maradt a felengedés után.")
-        // The duplicate press must not reach the transport twice.
+        XCTAssertEqual(
+            calls.last?.enabled,
+            false,
+            "A mikrofon bekapcsolva maradt a felengedés után: \(calls)"
+        )
+    }
+
+    func testRepeatedPressReleaseAlwaysEndsWithTheMicrophoneOff() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        for _ in 0 ..< 50 {
+            subject.requestTalking(true, channelID: channelID)
+            subject.requestTalking(false, channelID: channelID)
+        }
+        await subject.waitForTalkWorkToSettle()
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        let calls = await transport.talkCallsValue()
+        XCTAssertNotEqual(calls.last?.enabled, true)
+    }
+
+    func testRedundantRequestsAreNotSentTwice() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        subject.requestTalking(true, channelID: channelID)
+        subject.requestTalking(true, channelID: channelID)
+        subject.requestTalking(true, channelID: channelID)
+        await subject.waitForTalkWorkToSettle()
+
+        let calls = await transport.talkCallsValue()
         XCTAssertEqual(calls.filter(\.enabled).count, 1)
     }
 
@@ -276,7 +360,9 @@ private actor TransportSpy: IntercomTransport {
 
     private(set) var didConnect = false
     private(set) var talkCalls: [TalkCall] = []
-    private var talkDelay: Duration = .zero
+    private var gate: CheckedContinuation<Void, Never>?
+    private var blockNext = false
+    private var isBlocked = false
     private let stream: AsyncStream<IntercomTransportEvent>
     private let continuation: AsyncStream<IntercomTransportEvent>.Continuation
 
@@ -288,10 +374,32 @@ private actor TransportSpy: IntercomTransport {
     func disconnect() async {}
     func setListening(_: Bool, channelID _: UUID) async throws {}
 
-    func setTalkDelay(_ delay: Duration) { talkDelay = delay }
+    /// Suspends the next `setTalking` until `unblock()`, so a test can hold the
+    /// transport open and act while a call is genuinely in flight.
+    func blockNextTalkCall() { blockNext = true }
+
+    /// Resolves once the transport is actually suspended inside `setTalking`.
+    func waitUntilBlocked(timeout: TimeInterval = 2) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !isBlocked, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return isBlocked
+    }
+
+    func unblock() {
+        blockNext = false
+        isBlocked = false
+        gate?.resume()
+        gate = nil
+    }
 
     func setTalking(_ enabled: Bool, channelID: UUID) async throws {
-        if talkDelay > .zero { try? await Task.sleep(for: talkDelay) }
+        if blockNext {
+            blockNext = false
+            isBlocked = true
+            await withCheckedContinuation { continuation in gate = continuation }
+        }
         talkCalls.append(TalkCall(enabled: enabled, channelID: channelID))
     }
 
@@ -305,7 +413,8 @@ private actor TransportSpy: IntercomTransport {
 private actor AudioSessionSpy: AudioSessionControlling {
     let permissionGranted: Bool
     private(set) var didActivate = false
-    private(set) var activateCount = 0
+    private(set) var permissionRequests = 0
+    private(set) var recordingModes: [Bool] = []
     private let stream: AsyncStream<AudioSessionEvent>
     private let continuation: AsyncStream<AudioSessionEvent>.Continuation
 
@@ -314,12 +423,18 @@ private actor AudioSessionSpy: AudioSessionControlling {
         (stream, continuation) = AsyncStream.makeStream()
     }
 
-    func requestMicrophonePermission() async -> Bool { permissionGranted }
-
-    func activate() async throws {
-        didActivate = true
-        activateCount += 1
+    func requestMicrophonePermission() async -> Bool {
+        permissionRequests += 1
+        return permissionGranted
     }
+
+    func activate(recording: Bool) async throws {
+        didActivate = true
+        recordingModes.append(recording)
+    }
+
+    func permissionRequestCount() -> Int { permissionRequests }
+    func activateRecordingModes() -> [Bool] { recordingModes }
 
     func deactivate() async {}
     func events() async -> AsyncStream<AudioSessionEvent> { stream }

@@ -13,7 +13,7 @@
 		A00100000000000000000005 /* AudioSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000005 /* AudioSessionController.swift */; };
 		A00100000000000000000006 /* IntercomViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000006 /* IntercomViewModel.swift */; };
 		A00100000000000000000007 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000007 /* RootView.swift */; };
-		A00100000000000000000008 /* ChannelCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* ChannelCard.swift */; };
+		A00100000000000000000008 /* ChannelRow.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000008 /* ChannelRow.swift */; };
 		A00100000000000000000009 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000009 /* Assets.xcassets */; };
 		A0010000000000000000000A /* IntercomViewModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000000A /* IntercomViewModelTests.swift */; };
 		A0010000000000000000000B /* APIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000000E /* APIModels.swift */; };
@@ -29,6 +29,9 @@
 		A00100000000000000000015 /* LiveKitTransportIntegrationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000017 /* LiveKitTransportIntegrationTests.swift */; };
 		A00100000000000000000016 /* TransportEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000018 /* TransportEventTests.swift */; };
 		A00100000000000000000017 /* AppEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B00100000000000000000019 /* AppEnvironmentTests.swift */; };
+		A00100000000000000000018 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000001A /* DesignSystem.swift */; };
+		A00100000000000000000019 /* ChannelSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000001B /* ChannelSettingsView.swift */; };
+		A0010000000000000000001A /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0010000000000000000001C /* ProfileView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -49,7 +52,7 @@
 		B00100000000000000000005 /* AudioSessionController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioSessionController.swift; sourceTree = "<group>"; };
 		B00100000000000000000006 /* IntercomViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntercomViewModel.swift; sourceTree = "<group>"; };
 		B00100000000000000000007 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/RootView.swift; sourceTree = "<group>"; };
-		B00100000000000000000008 /* ChannelCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/Components/ChannelCard.swift; sourceTree = "<group>"; };
+		B00100000000000000000008 /* ChannelRow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/Components/ChannelRow.swift; sourceTree = "<group>"; };
 		B00100000000000000000009 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Resources/Assets.xcassets; sourceTree = "<group>"; };
 		B0010000000000000000000A /* IntercomViewModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IntercomViewModelTests.swift; sourceTree = "<group>"; };
 		B0010000000000000000000B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Resources/Info.plist; sourceTree = "<group>"; };
@@ -67,6 +70,9 @@
 		B00100000000000000000017 /* LiveKitTransportIntegrationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveKitTransportIntegrationTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000018 /* TransportEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransportEventTests.swift; sourceTree = "<group>"; };
 		B00100000000000000000019 /* AppEnvironmentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppEnvironmentTests.swift; sourceTree = "<group>"; };
+		B0010000000000000000001A /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/DesignSystem.swift; sourceTree = "<group>"; };
+		B0010000000000000000001B /* ChannelSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UI/ChannelSettingsView.swift; sourceTree = "<group>"; };
+		B0010000000000000000001C /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Features/Profile/ProfileView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -90,7 +96,7 @@
 		100100000000000000000005 /* Services */ = {isa = PBXGroup; path = Services; sourceTree = "<group>"; children = (B00100000000000000000003, B00100000000000000000004, B00100000000000000000005, B00100000000000000000012, B00100000000000000000010, B00100000000000000000011); };
 		10010000000000000000000A /* Networking */ = {isa = PBXGroup; path = Networking; sourceTree = "<group>"; children = (B0010000000000000000000E, B0010000000000000000000F); };
 		100100000000000000000006 /* Features */ = {isa = PBXGroup; path = Features/Intercom; sourceTree = "<group>"; children = (B00100000000000000000006, B00100000000000000000016); };
-		100100000000000000000007 /* UI and Resources */ = {isa = PBXGroup; sourceTree = "<group>"; children = (B00100000000000000000007, B00100000000000000000008, B00100000000000000000009, B0010000000000000000000B); };
+		100100000000000000000007 /* UI and Resources */ = {isa = PBXGroup; sourceTree = "<group>"; children = (B00100000000000000000007, B00100000000000000000008, B00100000000000000000009, B0010000000000000000000B, B0010000000000000000001A, B0010000000000000000001B, B0010000000000000000001C); };
 		100100000000000000000008 /* FlyAboveIntercomTests */ = {isa = PBXGroup; path = FlyAboveIntercomTests; sourceTree = "<group>"; children = (B0010000000000000000000A, B00100000000000000000013, B00100000000000000000014, B00100000000000000000017, B00100000000000000000018, B00100000000000000000019); };
 		100100000000000000000009 /* Products */ = {isa = PBXGroup; name = Products; sourceTree = "<group>"; children = (B0010000000000000000000C, B0010000000000000000000D); };
 /* End PBXGroup section */
@@ -144,7 +150,7 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		F00200000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000001, A00100000000000000000002, A00100000000000000000003, A00100000000000000000004, A00100000000000000000005, A00100000000000000000006, A00100000000000000000007, A00100000000000000000008, A0010000000000000000000B, A0010000000000000000000C, A0010000000000000000000D, A0010000000000000000000E, A0010000000000000000000F, A00100000000000000000013, A00100000000000000000014); runOnlyForDeploymentPostprocessing = 0; };
+		F00200000000000000000001 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A00100000000000000000001, A00100000000000000000002, A00100000000000000000003, A00100000000000000000004, A00100000000000000000005, A00100000000000000000006, A00100000000000000000007, A00100000000000000000008, A0010000000000000000000B, A0010000000000000000000C, A0010000000000000000000D, A0010000000000000000000E, A0010000000000000000000F, A00100000000000000000013, A00100000000000000000014, A00100000000000000000018, A00100000000000000000019, A0010000000000000000001A); runOnlyForDeploymentPostprocessing = 0; };
 		F00200000000000000000002 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (A0010000000000000000000A, A00100000000000000000010, A00100000000000000000011, A00100000000000000000015, A00100000000000000000016, A00100000000000000000017); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXSourcesBuildPhase section */
 

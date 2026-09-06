@@ -26,7 +26,9 @@ enum AudioRouteChangeReason: Sendable, Equatable {
 
 protocol AudioSessionControlling: Sendable {
     func requestMicrophonePermission() async -> Bool
-    func activate() async throws
+    /// `recording: false` configures a playback-only session, so a listen-only
+    /// operator never has to grant microphone access.
+    func activate(recording: Bool) async throws
     func deactivate() async
     func events() async -> AsyncStream<AudioSessionEvent>
     func currentOutputName() async -> String?
@@ -111,18 +113,24 @@ final class AudioSessionController: AudioSessionControlling, @unchecked Sendable
         await AVAudioApplication.requestRecordPermission()
     }
 
-    /// Configures the session for two-way low-latency voice.
+    /// Configures the session for low-latency voice.
     ///
     /// LiveKit reconfigures the session again when it publishes or subscribes to
     /// a track; these values are the ones that survive and matter before that
     /// happens (and are the whole story for the preview transport).
-    func activate() async throws {
+    func activate(recording: Bool) async throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.allowBluetoothHFP, .defaultToSpeaker]
-        )
+        if recording {
+            try session.setCategory(
+                .playAndRecord,
+                mode: .voiceChat,
+                options: [.allowBluetoothHFP, .defaultToSpeaker]
+            )
+        } else {
+            // Holding a record category we are not using would light the
+            // microphone indicator and demand a permission the user never needs.
+            try session.setCategory(.playback, mode: .spokenAudio)
+        }
         try session.setPreferredSampleRate(48_000)
         try session.setPreferredIOBufferDuration(0.01)
         try session.setActive(true, options: .notifyOthersOnDeactivation)

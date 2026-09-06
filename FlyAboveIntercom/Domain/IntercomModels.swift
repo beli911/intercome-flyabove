@@ -102,6 +102,50 @@ struct IntercomConfiguration: Equatable, Sendable {
     )
 }
 
+/// How the Talk control behaves.
+///
+/// Momentary is the safe default: the microphone cannot stay open by accident,
+/// because holding the button is what keeps it open. Latch exists because an
+/// operator whose hands are on a camera cannot hold anything.
+enum TalkMode: String, CaseIterable, Identifiable, Sendable {
+    case momentary
+    case latch
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .momentary: "MOMENTARY"
+        case .latch: "LATCH"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .momentary: "Tartsd nyomva. Felengedve azonnal zár."
+        case .latch: "Koppintásra beragad, újra koppintásra zár."
+        }
+    }
+}
+
+/// Dark by default: most of this work happens in a gallery or a truck. Daylight
+/// mode exists because an outside broadcast in sun is unreadable otherwise.
+enum AppTheme: String, CaseIterable, Identifiable, Sendable {
+    case dark
+    case light
+    case auto
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .dark: "SÖTÉT"
+        case .light: "NAPFÉNY"
+        case .auto: "AUTO"
+        }
+    }
+}
+
 /// Connection quality figures for the developer overlay.
 ///
 /// Named `Intercom…` rather than `TransportStatistics` because LiveKit exports a

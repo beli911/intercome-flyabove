@@ -36,6 +36,11 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// Per-room connection state. One channel reconnecting must not be masked
     /// by another reporting `.connected`.
     private var roomStates: [UUID: LiveKit.ConnectionState] = [:]
+    /// In-flight joins. Actor isolation does not help here: `room.connect` is an
+    /// await, and a Listen and a Talk arriving together would otherwise both
+    /// find `sessions[channelID] == nil` and open two rooms, of which only the
+    /// last would stay under lifecycle management.
+    private var joinTasks: [UUID: Task<Void, any Error>] = [:]
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
 
@@ -153,6 +158,21 @@ actor LiveKitIntercomTransport: IntercomTransport {
     // MARK: - Rooms
 
     private func join(channelID: UUID) async throws {
+        if let inFlight = joinTasks[channelID] {
+            return try await inFlight.value
+        }
+        guard sessions[channelID] == nil else { return }
+
+        let task = Task { [weak self] in
+            guard let self else { return }
+            try await self.performJoin(channelID: channelID)
+        }
+        joinTasks[channelID] = task
+        defer { joinTasks[channelID] = nil }
+        try await task.value
+    }
+
+    private func performJoin(channelID: UUID) async throws {
         guard sessions[channelID] == nil else { return }
         guard let serverURL else { throw IntercomTransportError.notConnected }
         guard let grant = grants[channelID] else { throw IntercomTransportError.unknownChannel }
@@ -191,6 +211,8 @@ actor LiveKitIntercomTransport: IntercomTransport {
     }
 
     private func leave(channelID: UUID) async {
+        joinTasks[channelID]?.cancel()
+        joinTasks[channelID] = nil
         roomStates.removeValue(forKey: channelID)
         guard let session = sessions.removeValue(forKey: channelID) else { return }
         await session.room.disconnect()
@@ -205,6 +227,8 @@ actor LiveKitIntercomTransport: IntercomTransport {
             await session.room.disconnect()
             emit(.talkStopped(channelID: channelID))
         }
+        for task in joinTasks.values { task.cancel() }
+        joinTasks.removeAll()
         sessions.removeAll()
         roomStates.removeAll()
         grants.removeAll()
