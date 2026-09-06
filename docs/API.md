@@ -264,6 +264,29 @@ A kliens ezután újraolvassa a csatornákat, és **először a visszavont Talko
 hallgattatja el** — az operátor épp nyomva tarthatja a gombot, és pontosan ez
 az, amiért ez a push létezik.
 
+## Szerződés-ellenőrzés
+
+Egy szerver megfelelését nem érdemes telefonon, egyesével kiderülő hibákból
+megtudni:
+
+```bash
+node scripts/check-api.mjs --base https://api.pelda.hu/ \
+  --email teszt@pelda.hu --password '…' --peer-email masik@pelda.hu
+```
+
+Végigméri a fenti szerződést, és megnevezi, ami eltér. A `--skip-writes` a
+csak olvasó ellenőrzésekre szorít; enélkül kiad egy meghívót és nyit-zár egy
+privát hívást, amit maga után eltakarít.
+
+Megkülönbözteti a **hibát** (`✗`, a szerződéstől való eltérés) és a
+**megjegyzést** (`·`, ami működik, de tudni érdemes) — például hogy a LiveKit
+URL `ws://` és nem `wss://`, vagy hogy a grantek élettartama szűkebb, mint amire
+a kliens megújítási logikája számít.
+
+Az ellenőrzőt a `dev-server` ellen validáltam: az 25 ellenőrzésen megy át, és
+szándékosan bevitt eltéréseket (`expiresIn` sztringként, hiányzó `role`, lapos
+hibaformátum) mind megfogja.
+
 ## Fejlesztői referencia-implementáció
 
 A `dev-server/` könyvtárban van egy Node-alapú, memóriában dolgozó

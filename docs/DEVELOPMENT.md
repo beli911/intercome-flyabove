@@ -70,6 +70,24 @@ kliens nem éri el a szervert. Ha ezt elutasítod, az app nem általános
 (rossz Wi-Fi, vagy hiányzó helyi hálózat engedély) — ez a hiba telefonon
 gyakori, és a szövegétől függ, hogy hol keresi az ember.
 
+## Új szerverre kötés
+
+```bash
+node scripts/check-api.mjs --base <url> --email <e-mail> --password <jelszó>
+```
+
+Előbb ezt, aztán a buildet: egy szerződéstől eltérő szerver a telefonon
+egyesével jelentkező, félrevezető hibákként jelenik meg.
+
+Ha átment, az app rákötése egyetlen build setting:
+
+```bash
+xcodebuild build -project FlyAboveIntercom.xcodeproj -scheme FlyAboveIntercom \
+  -destination '<cél>' FLYABOVE_API_BASE_URL='https://api.pelda.hu/'
+```
+
+Release buildben a plain HTTP el van utasítva; ott csak `https://` cím megy.
+
 ## Projektelvek
 
 - A UI nem hív közvetlenül WebRTC vagy HTTP SDK-t.
