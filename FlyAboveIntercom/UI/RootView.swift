@@ -2,6 +2,8 @@ import SwiftUI
 
 struct RootView: View {
     @ObservedObject var viewModel: IntercomViewModel
+    var isDemoMode: Bool = false
+    var onSignOut: (() async -> Void)?
 
     var body: some View {
         NavigationStack {
@@ -11,6 +13,10 @@ struct RootView: View {
                 ScrollView {
                     VStack(spacing: 16) {
                         ConnectionHeader(viewModel: viewModel)
+
+                        if isDemoMode {
+                            DemoModeBanner()
+                        }
 
                         ForEach(viewModel.configuration.channels) { channel in
                             ChannelCard(
@@ -25,6 +31,13 @@ struct RootView: View {
                             )
                         }
 
+                        if viewModel.isDeveloperModeEnabled {
+                            DeveloperOverlay(
+                                statistics: viewModel.statistics,
+                                routeName: viewModel.audioRouteName
+                            )
+                        }
+
                         Text("A TALK gombot tartsd lenyomva beszéd közben. A mikrofon csak kapcsolódás után aktiválható.")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
@@ -36,6 +49,12 @@ struct RootView: View {
             }
             .navigationTitle("FlyAbove Intercom")
             .toolbar {
+                if let onSignOut {
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button("Kilépés") { Task { await onSignOut() } }
+                    }
+                }
+
                 ToolbarItem(placement: .topBarTrailing) {
                     Image(systemName: "waveform.badge.mic")
                         .foregroundStyle(viewModel.activeTalkChannelCount > 0 ? .red : .secondary)
@@ -88,7 +107,7 @@ private struct ConnectionHeader: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(viewModel.isConnected ? .red : .blue)
-            .disabled(viewModel.connectionState == .connecting)
+            .disabled(viewModel.connectionState == .connecting || viewModel.connectionState == .reconnecting)
         }
         .padding()
         .background(.background, in: RoundedRectangle(cornerRadius: 18))
@@ -97,9 +116,57 @@ private struct ConnectionHeader: View {
     private var statusColor: Color {
         switch viewModel.connectionState {
         case .connected: .green
-        case .connecting: .orange
+        case .connecting, .reconnecting: .orange
         case .disconnected: .gray
         case .failed: .red
         }
+    }
+}
+
+private struct DemoModeBanner: View {
+    var body: some View {
+        Label(
+            "Demó mód: nincs beállítva szerver, a hang nem megy hálózaton.",
+            systemImage: "exclamationmark.triangle.fill"
+        )
+        .font(.footnote)
+        .foregroundStyle(.orange)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+/// Debug-only connection quality readout, so a soak test can be judged from the
+/// device instead of the console.
+private struct DeveloperOverlay: View {
+    let statistics: IntercomStatistics?
+    let routeName: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Fejlesztői adatok")
+                .font(.caption.bold())
+                .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Text(statistics?.roundTripDescription ?? "RTT –")
+                Text(bitrate("↑", statistics?.availableOutgoingBitrateKbps))
+                Text(bitrate("↓", statistics?.availableIncomingBitrateKbps))
+            }
+            .font(.caption.monospacedDigit())
+
+            Text("Kimenet: \(routeName ?? "ismeretlen")")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(.background, in: RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func bitrate(_ prefix: String, _ value: Double?) -> String {
+        guard let value else { return "\(prefix) –" }
+        return "\(prefix) \(Int(value.rounded())) kbps"
     }
 }

@@ -3,27 +3,36 @@
 Natív iOS produkciós intercom alkalmazás. A cél egy alacsony késleltetésű,
 többcsatornás, interneten és helyi hálózaton is használható kommunikációs rendszer.
 
-## Jelenlegi állapot – 0.1 alap
+## Jelenlegi állapot – 0.2
+
+Kliensoldalon:
 
 - natív SwiftUI alkalmazás iOS 17+-hoz;
-- csatornalista és résztvevőszám;
-- csatornánkénti Listen kapcsoló;
-- nyomva tartandó Talk/PTT gomb;
+- csatornalista, résztvevőszám, beszélőjelzés;
+- csatornánkénti Listen kapcsoló és momentary Talk/PTT;
 - mikrofonengedély és `AVAudioSession` voice-chat konfiguráció;
-- kapcsolat- és hibastátusz;
-- cserélhető `IntercomTransport` réteg;
-- unit tesztek a kapcsolat és a PTT alapállapotaihoz.
+- audio interruption, route change és media-services-reset kezelés;
+- bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
+- LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
+- RTT/bitráta overlay fejlesztői módban;
+- 27 unit teszt (auth, tokentárolás, view model eseménykezelés).
 
-A jelenlegi `PreviewIntercomTransport` helyi demó: a felület és az audio-session
-működik, de még nem továbbít hangot hálózaton. A következő mérföldkő a WebRTC
-transport és a signaling/backend szerződés.
+**Szerver nélkül nem szól.** A hang továbbításához LiveKit telepítés (vagy
+LiveKit Cloud) és a [docs/API.md](docs/API.md) szerinti token/API szerver kell.
+Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa üres, az app **demó módban**
+indul: bejelentkezés nélkül, helyi transporttal, a felületen jelzett módon.
 
 ## Indítás
 
 1. Nyisd meg a `FlyAboveIntercom.xcodeproj` projektet Xcode 26-tal.
 2. Válassz iOS 17 vagy újabb szimulátort/eszközt.
-3. Futtasd a `FlyAboveIntercom` scheme-et.
+3. Futtasd a `FlyAboveIntercom` scheme-et. Első build előtt Xcode feloldja a
+   LiveKit SPM-függőséget, ez néhány percet vehet igénybe.
 4. Valódi mikrofon és Bluetooth teszthez használj fizikai iPhone-t.
+
+Szerver bekötése: írd be a bázis-URL-t az `Info.plist` `FlyAboveAPIBaseURL`
+kulcsába (például `https://api.intercom.flyabove.hu/`), és az app a
+bejelentkezési képernyővel indul.
 
 Parancssoros ellenőrzés:
 
@@ -38,6 +47,7 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
 ## Dokumentáció
 
 - [Architektúra](docs/ARCHITECTURE.md)
+- [API-szerződés](docs/API.md)
 - [Fejlesztési terv](docs/ROADMAP.md)
 - [Fejlesztői útmutató](docs/DEVELOPMENT.md)
 - [Biztonság és adatvédelem](docs/SECURITY.md)
@@ -47,8 +57,9 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
 - Swift 6
 - SwiftUI + Combine (`ObservableObject`)
 - AVFAudio / AVAudioSession
-- strukturált Swift concurrency
-- tervezett: WebRTC, WebSocket/HTTPS signaling, STUN/TURN
+- strukturált Swift concurrency (actorok, `AsyncStream`)
+- LiveKit `client-sdk-swift` 2.16 (WebRTC, DTLS-SRTP, ICE/TURN)
+- Security.framework / Keychain
 
 ## Licenc
 

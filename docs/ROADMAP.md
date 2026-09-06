@@ -9,18 +9,26 @@
 - transport absztrakció
 - alap unit tesztek
 
-## M1 – Valós WebRTC hang
+## M1 – Valós WebRTC hang (kliensoldal kész, szerver nélkül nem igazolható)
 
-- backend/API szerződés rögzítése
-- autentikáció és Keychain tokenkezelés
-- WebRTC SDK integráció
-- egy party-line csatorna kétirányú hangja
-- STUN/TURN konfiguráció
-- connection statistics és RTT kijelzés fejlesztői módban
-- audio interruption és route-change kezelés
+Médiaszerver: **LiveKit**, `client-sdk-swift` 2.16. Egy csatorna = egy LiveKit szoba.
 
-Elfogadási feltétel: két fizikai iPhone külön hálózatról tud PTT és nyitott
-mikrofonos beszélgetést folytatni, bontás után automatikusan újracsatlakozik.
+Kliensoldalon elkészült:
+
+- backend/API szerződés rögzítése → [docs/API.md](API.md)
+- autentikáció és Keychain tokenkezelés (`AuthService`, `KeychainTokenStore`)
+- WebRTC SDK integráció (LiveKit SPM, beágyazott `LiveKitWebRTC.framework`)
+- `LiveKitIntercomTransport`: szobánkénti join/leave, PTT publish/unpublish
+- TURN átadási pont: `extraIceServers`
+- connection statistics és RTT overlay fejlesztői módban
+- audio interruption, route change és media-services-reset kezelés
+
+Hátralévő, szervert igénylő feladat:
+
+- LiveKit telepítés vagy LiveKit Cloud projekt
+- token- és API-szerver a `docs/API.md` szerint
+- **elfogadási feltétel:** két fizikai iPhone külön hálózatról tud PTT és nyitott
+  mikrofonos beszélgetést folytatni, bontás után automatikusan újracsatlakozik
 
 ## M2 – Produkció és több csatorna
 
