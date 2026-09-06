@@ -38,6 +38,10 @@ final class IntercomViewModel: ObservableObject {
 
     private let transport: any IntercomTransport
     private let audioSession: any AudioSessionControlling
+    /// Called when the server says our configuration is stale. The view model
+    /// does not fetch: whoever owns the API sets this and hands back the fresh
+    /// channel list.
+    var onConfigurationStale: (@MainActor (Int) async -> Void)?
     private var observationTasks: [Task<Void, Never>] = []
 
     /// What the user asked for, and what the transport has been told. A Talk
@@ -468,6 +472,78 @@ final class IntercomViewModel: ObservableObject {
 
         case let .statistics(values):
             statistics = values
+
+        case let .configurationStale(version):
+            Task { await onConfigurationStale?(version) }
+        }
+    }
+
+    /// Applies a configuration the server has just changed under us.
+    ///
+    /// Order matters and is deliberate. A revoked Talk is silenced before
+    /// anything else is touched: the operator may be holding the button down
+    /// right now, and the whole point of this push is that the microphone stops
+    /// when the production says so. Only then do the cosmetic and structural
+    /// changes land.
+    func applyUpdatedChannels(_ descriptors: [ChannelDescriptor]) async {
+        let incoming = Dictionary(
+            uniqueKeysWithValues: descriptors.map { ($0.id, $0) }
+        )
+
+        // 1. Revoked Talk, on every affected channel, first.
+        for channel in configuration.channels where channel.isTalking {
+            let stillAllowed = incoming[channel.id]?.canTalk ?? false
+            guard !stillAllowed else { continue }
+            desiredTalk[channel.id] = false
+            setTalkingFlag(false, channelID: channel.id)
+            startTalkWorker(channelID: channel.id)
+        }
+        await waitForTalkWorkToSettle()
+
+        // 2. Revoked Listen, and channels that are gone entirely.
+        for channel in configuration.channels {
+            let descriptor = incoming[channel.id]
+            let stillAudible = descriptor?.canListen ?? false
+            guard channel.isListening, !stillAudible else { continue }
+            try? await transport.setListening(false, channelID: channel.id)
+        }
+
+        // 3. Merge. Names, details and colours follow the server; Listen state
+        //    and volume belong to the operator and are kept where still valid.
+        var merged: [IntercomChannel] = []
+        for descriptor in descriptors {
+            if let existing = configuration.channels.first(where: { $0.id == descriptor.id }) {
+                var channel = existing
+                channel.name = descriptor.name
+                channel.detail = descriptor.detail
+                channel.colorHex = descriptor.colorHex
+                channel.canTalk = descriptor.canTalk
+                channel.canListen = descriptor.canListen
+                channel.isListening = existing.isListening && descriptor.canListen
+                channel.isTalking = existing.isTalking && descriptor.canTalk
+                merged.append(channel)
+            } else {
+                // A channel we have just been given access to, following the
+                // server's `defaultListening` exactly as a fresh session would.
+                // Granting access mid-show is usually the production saying
+                // "you need to hear this", and having the same descriptor mean
+                // one thing at launch and another an hour later would be worse
+                // than either choice on its own.
+                merged.append(IntercomChannel(descriptor: descriptor))
+            }
+        }
+
+        let removed = configuration.channels.filter { incoming[$0.id] == nil }
+        configuration.channels = merged
+
+        for channel in removed {
+            desiredTalk[channel.id] = nil
+            appliedTalk[channel.id] = nil
+            try? await transport.setListening(false, channelID: channel.id)
+        }
+
+        if !removed.isEmpty || descriptors.count != merged.count {
+            errorMessage = nil
         }
     }
 

@@ -33,6 +33,10 @@ enum IntercomTransportEvent: Sendable {
     /// UI must release the Talk button.
     case talkStopped(channelID: UUID)
     case statistics(IntercomStatistics)
+    /// The server says the configuration we hold is stale. Only a version
+    /// travels: the REST endpoint stays the single source of truth, and a
+    /// client that missed a message still converges on the next one.
+    case configurationStale(version: Int)
 }
 
 /// A signaling and realtime-media implementation boundary.

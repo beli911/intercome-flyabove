@@ -168,9 +168,9 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         let secondConnected = await secondEvents.waitForConnected(timeout: 20)
         XCTAssertTrue(secondConnected, "A második kliens nem csatlakozott.")
 
-        let sharedChannel = try XCTUnwrap(firstConfiguration.channels.first {
-            $0.name == "Mindenki"
-        })
+        // By position, not by name: a channel's name is server-owned and can
+        // change under the test.
+        let sharedChannel = try XCTUnwrap(firstConfiguration.channels.first { $0.canListen })
         let sawSecondClient = await firstEvents.waitForParticipantCount(
             atLeast: 2,
             channelID: sharedChannel.id,
@@ -364,6 +364,49 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         XCTAssertTrue(recovered, "A kil\u{00E9}ptetett vonal nem \u{00E1}llt helyre mag\u{00E1}t\u{00F3}l.")
     }
 
+    /// The admin push, end to end.
+    ///
+    /// Nothing else in the suite covers the path from a REST change, through
+    /// the LiveKit data channel, to the client noticing. The rename is
+    /// incidental; what is under test is that the broadcast arrives at all.
+    func testAServerSideChannelChangeReachesTheClient() async throws {
+        // The second seed production is the one this account supervises, and
+        // only a supervisor may change a channel.
+        let configuration = try await liveConfiguration(
+            email: "operator@flyabove.hu",
+            productionNamed: "Reggeli stúdió — 4. blokk"
+        )
+        let transport = LiveKitIntercomTransport(api: api, auth: auth)
+        let collector = EventCollector(stream: await transport.events())
+
+        try await transport.connect(configuration: configuration)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected)
+
+        let production = try XCTUnwrap(configuration.productionID)
+        let channel = try XCTUnwrap(configuration.channels.first)
+        let originalName = channel.name
+        let renamed = "\(originalName) \(Int.random(in: 100 ... 999))"
+        try await patchChannel(
+            production: production,
+            channel: channel.id,
+            body: ["name": renamed]
+        )
+
+        let noticed = await collector.waitForConfigurationStale(timeout: 20)
+
+        // The dev seed shares its channel list between productions, so a test
+        // that leaves one renamed breaks whatever runs next.
+        try? await patchChannel(
+            production: production,
+            channel: channel.id,
+            body: ["name": originalName]
+        )
+        await transport.disconnect()
+
+        XCTAssertTrue(noticed, "A szerver konfigurációs broadcastja nem ért el a klienshez.")
+    }
+
     // MARK: - Helpers
 
     private struct DebugParticipants: Decodable {
@@ -400,6 +443,47 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     private func liveConfiguration(email: String) async throws -> IntercomConfiguration {
         try await auth.login(email: email, password: "flyabove")
         return try await liveConfiguration(auth: auth)
+    }
+
+    private func liveConfiguration(
+        email: String,
+        productionNamed name: String
+    ) async throws -> IntercomConfiguration {
+        try await auth.login(email: email, password: "flyabove")
+        let accessToken = try await auth.validAccessToken()
+        let productions = try await api.productions(accessToken: accessToken)
+        let production = try XCTUnwrap(productions.first { $0.name == name })
+        let descriptors = try await api.channels(
+            productionID: production.id,
+            accessToken: accessToken
+        )
+        return IntercomConfiguration(
+            displayName: "Integrációs teszt",
+            productionName: production.name,
+            productionID: production.id,
+            serverURL: nil,
+            channels: descriptors.map(IntercomChannel.init(descriptor:))
+        )
+    }
+
+    private func patchChannel(
+        production: UUID,
+        channel: UUID,
+        body: [String: String]
+    ) async throws {
+        let accessToken = try await auth.validAccessToken()
+        var request = URLRequest(
+            url: Self.baseURL.appendingPathComponent(
+                "v1/productions/\(production.uuidString.lowercased())/channels/\(channel.uuidString.lowercased())"
+            )
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (_, response) = try await URLSession.intercom.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        XCTAssertEqual(status, 200, "A csatorna módosítása nem sikerült.")
     }
 
     private func liveConfiguration(auth: AuthService) async throws -> IntercomConfiguration {
@@ -486,6 +570,14 @@ private actor CountingAPI: IntercomAPI {
         try await wrapped.crew(productionID: productionID, accessToken: accessToken)
     }
 
+    func invitePreview(code: String, accessToken: String) async throws -> InvitePreview {
+        try await wrapped.invitePreview(code: code, accessToken: accessToken)
+    }
+
+    func redeemInvite(code: String, accessToken: String) async throws -> ProductionSummary {
+        try await wrapped.redeemInvite(code: code, accessToken: accessToken)
+    }
+
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -525,6 +617,15 @@ private actor EventCollector {
         }
     }
 
+    func waitForConfigurationStale(timeout: TimeInterval) async -> Bool {
+        await waitFor(timeout: timeout) { events in
+            events.contains { event in
+                if case .configurationStale = event { return true }
+                return false
+            }
+        }
+    }
+
     func waitForParticipantCount(
         atLeast minimum: Int,
         channelID: UUID,
@@ -548,6 +649,7 @@ private actor EventCollector {
             case let .remoteSpeakingChanged(_, speaking): "speaking(\(speaking))"
             case .talkStopped: "talkStopped"
             case .statistics: "stats"
+            case let .configurationStale(version): "configStale(\(version))"
             }
         }
     }

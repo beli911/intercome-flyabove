@@ -53,6 +53,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// Bumped by every connect and teardown. A `room.connect` that returns after
     /// the session it belonged to is gone must not install itself.
     private var sessionGeneration = 0
+    private var lastConfigurationVersion = 0
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
     private var grantRenewalTask: Task<Void, Never>?
@@ -286,6 +287,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
         wantsListening.removeAll()
         wantsTalking.removeAll()
         volumes.removeAll()
+        lastConfigurationVersion = 0
         for task in recoveryTasks.values { task.cancel() }
         recoveryTasks.removeAll()
 
@@ -340,6 +342,12 @@ actor LiveKitIntercomTransport: IntercomTransport {
             emit(.remoteSpeakingChanged(channelID: channelID, isSpeaking: isSpeaking))
         case .localAudioUnpublished:
             emit(.talkStopped(channelID: channelID))
+        case let .configurationStale(version):
+            // Every joined room gets the same broadcast; only the first one
+            // needs to be acted on.
+            guard version > lastConfigurationVersion else { return }
+            lastConfigurationVersion = version
+            emit(.configurationStale(version: version))
         }
     }
 
@@ -509,6 +517,7 @@ private enum RoomSignal: Sendable {
     case participantsChanged
     case remoteSpeaking(Bool)
     case localAudioUnpublished
+    case configurationStale(version: Int)
 }
 
 private final class RoomObserver: NSObject, RoomDelegate, @unchecked Sendable {
@@ -551,6 +560,27 @@ private final class RoomObserver: NSObject, RoomDelegate, @unchecked Sendable {
     func room(_: Room, participant _: LocalParticipant, didUnpublishTrack _: LocalTrackPublication) {
         handler(channelID, .localAudioUnpublished)
     }
+
+    /// Server-sent control messages. Parsed here so nothing but a value type
+    /// crosses onto the transport actor.
+    func room(
+        _: Room,
+        participant _: RemoteParticipant?,
+        didReceiveData data: Data,
+        forTopic _: String,
+        encryptionType _: EncryptionType
+    ) {
+        guard
+            let payload = try? JSONDecoder().decode(ControlMessage.self, from: data),
+            payload.type == "configuration"
+        else { return }
+        handler(channelID, .configurationStale(version: payload.version))
+    }
+}
+
+private struct ControlMessage: Decodable {
+    let type: String
+    let version: Int
 }
 
 

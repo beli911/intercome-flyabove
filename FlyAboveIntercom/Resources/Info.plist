@@ -30,6 +30,19 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>A produkciós meghívó QR-kódjának beolvasásához.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>hu.flyabove.intercom.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>flyabove-intercom</string>
+			</array>
+		</dict>
+	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>A helyi hálózaton futó fejlesztői intercom szerver eléréséhez.</string>
 	<key>LSRequiresIPhoneOS</key>

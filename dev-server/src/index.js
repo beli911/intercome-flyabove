@@ -11,8 +11,11 @@ import jwt from 'jsonwebtoken';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import {
   channels,
+  configurationVersion,
   findUserByEmail,
   findUserById,
+  generateInviteCode,
+  invites,
   productions,
   roomName,
   users,
@@ -33,6 +36,12 @@ const ROOM_TOKEN_TTL_SECONDS = 60 * 60;
 /// invalidates it and mints a new pair, which is what the client's
 /// single-flight refresh is written to survive.
 const liveRefreshTokens = new Map();
+
+const roomService = new RoomServiceClient(
+  LIVEKIT_URL.replace(/^ws/, 'http'),
+  LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET,
+);
 
 const app = express();
 app.use(express.json());
@@ -157,19 +166,7 @@ app.get('/v1/productions/:productionId/channels', authenticate, (req, res) => {
   }
 
   const payload = channels
-    .map((channel) => {
-      const { canTalk, canListen } = permissionsFor(req.user, channel.id);
-      return {
-        id: channel.id,
-        name: channel.name,
-        detail: channel.detail,
-        colorHex: channel.colorHex,
-        canTalk,
-        canListen,
-        defaultListening: channel.defaultListening && canListen,
-        participantCount: 0,
-      };
-    })
+    .map((channel) => channelDescriptor(channel, req.user))
     // A channel the user may neither hear nor speak on should not be listed.
     .filter((channel) => channel.canTalk || channel.canListen);
 
@@ -189,6 +186,161 @@ app.get('/v1/productions/:productionId/crew', authenticate, (req, res) => {
     role: user.role ?? 'operator',
   })));
 });
+
+function channelDescriptor(channel, user) {
+  const { canTalk, canListen } = permissionsFor(user, channel.id);
+  return {
+    id: channel.id,
+    name: channel.name,
+    detail: channel.detail,
+    colorHex: channel.colorHex,
+    canTalk,
+    canListen,
+    defaultListening: channel.defaultListening && canListen,
+    participantCount: 0,
+  };
+}
+
+// MARK: - Invites
+//
+// An invite is how a production gets a freelancer onto the line without an
+// admin typing their address. It names one production, carries an expiry, and
+// is spent once — a code that keeps working after the show is a way in for
+// whoever still has the group chat.
+
+const INVITE_TTL_MINUTES = 60 * 12;
+
+app.post('/v1/productions/:productionId/invites', authenticate, (req, res) => {
+  const production = productions.find((p) => p.id === normalizeId(req.params.productionId));
+  if (!production) {
+    return fail(res, 404, 'production_not_found', 'Nincs ilyen produkció.');
+  }
+  // Only a supervisor or admin hands out access.
+  if (!['supervisor', 'admin'].includes(production.role)) {
+    return fail(res, 403, 'forbidden', 'Meghívót csak supervisor vagy admin adhat ki.');
+  }
+
+  const minutes = Number(req.body?.expiresInMinutes ?? INVITE_TTL_MINUTES);
+  const code = generateInviteCode();
+  const expiresAt = new Date(Date.now() + minutes * 60 * 1000);
+  invites.set(code, {
+    code,
+    productionId: production.id,
+    expiresAt,
+    createdBy: req.user.id,
+    redeemedBy: null,
+  });
+
+  console.log(`  meghívó kiadva: ${code} → ${production.name}`);
+  return res.status(201).json({
+    code,
+    url: `flyabove-intercom://invite/${code}`,
+    productionId: production.id,
+    productionName: production.name,
+    expiresAt: expiresAt.toISOString(),
+  });
+});
+
+function inviteOrFailure(rawCode) {
+  const code = String(rawCode ?? '').trim().toUpperCase();
+  const invite = invites.get(code);
+  if (!invite) return { error: ['invite_not_found', 'Nincs ilyen meghívókód.'] };
+  if (invite.expiresAt.getTime() <= Date.now()) {
+    return { error: ['invite_expired', 'A meghívó lejárt.'] };
+  }
+  if (invite.redeemedBy) {
+    return { error: ['invite_used', 'Ezt a meghívót már felhasználták.'] };
+  }
+  return { invite };
+}
+
+app.get('/v1/invites/:code', authenticate, (req, res) => {
+  const { invite, error } = inviteOrFailure(req.params.code);
+  if (error) return fail(res, 404, error[0], error[1]);
+  const production = productions.find((p) => p.id === invite.productionId);
+  return res.json({
+    code: invite.code,
+    productionId: invite.productionId,
+    productionName: production?.name ?? '—',
+    expiresAt: invite.expiresAt.toISOString(),
+  });
+});
+
+app.post('/v1/invites/:code/redeem', authenticate, (req, res) => {
+  const { invite, error } = inviteOrFailure(req.params.code);
+  if (error) return fail(res, 404, error[0], error[1]);
+
+  const production = productions.find((p) => p.id === invite.productionId);
+  if (!production) {
+    return fail(res, 404, 'production_not_found', 'A meghívóhoz tartozó produkció eltűnt.');
+  }
+
+  invite.redeemedBy = req.user.id;
+  // Development shortcut: the seed users already have channel permissions, so
+  // redeeming only has to report which production was joined.
+  console.log(`  meghívó beváltva: ${invite.code} ← ${req.user.email}`);
+  return res.json({ production });
+});
+
+// MARK: - Admin configuration
+
+app.patch('/v1/productions/:productionId/channels/:channelId', authenticate, async (req, res) => {
+  const productionId = normalizeId(req.params.productionId);
+  const production = productions.find((p) => p.id === productionId);
+  if (!production) {
+    return fail(res, 404, 'production_not_found', 'Nincs ilyen produkció.');
+  }
+  if (!['supervisor', 'admin'].includes(production.role)) {
+    return fail(res, 403, 'forbidden', 'Csatornát csak supervisor vagy admin módosíthat.');
+  }
+
+  const channelId = normalizeId(req.params.channelId);
+  const channel = channels.find((c) => c.id === channelId);
+  if (!channel) return fail(res, 404, 'not_found', 'Nincs ilyen csatorna.');
+
+  if (typeof req.body?.name === 'string') channel.name = req.body.name;
+  if (typeof req.body?.detail === 'string') channel.detail = req.body.detail;
+  if (typeof req.body?.colorHex === 'string') channel.colorHex = req.body.colorHex;
+
+  // Permission changes are the reason this push exists: a revoked Talk has to
+  // reach a phone that is holding the button down.
+  if (req.body?.permissions && typeof req.body.permissions === 'object') {
+    for (const [userId, rights] of Object.entries(req.body.permissions)) {
+      const user = findUserById(normalizeId(userId));
+      if (!user) continue;
+      user.permissions[channelId] = {
+        canTalk: Boolean(rights?.canTalk),
+        canListen: Boolean(rights?.canListen),
+      };
+    }
+  }
+
+  configurationVersion.value += 1;
+  await broadcastConfigurationChange(productionId);
+
+  return res.json({ ...channelDescriptor(channel, req.user), version: configurationVersion.value });
+});
+
+/// Tells every joined client that the configuration it holds is stale.
+///
+/// The payload deliberately carries only a version, not the configuration
+/// itself: the REST endpoint stays the single source of truth, and a client
+/// that missed a message still converges on the next one.
+async function broadcastConfigurationChange(productionId) {
+  const payload = new TextEncoder().encode(JSON.stringify({
+    type: 'configuration',
+    version: configurationVersion.value,
+    productionId,
+  }));
+
+  await Promise.all(channels.map(async (channel) => {
+    try {
+      await roomService.sendData(roomName(productionId, channel.id), payload, 0);
+    } catch {
+      // A room nobody has joined needs no notification.
+    }
+  }));
+}
 
 // MARK: - Realtime
 
@@ -246,12 +398,6 @@ app.post('/v1/productions/:productionId/rt-tokens', authenticate, async (req, re
 // churn left no orphan connection behind: an orphan room is invisible to the
 // client that lost track of it. Development server, so this needs no auth
 // beyond the caller already having a session.
-
-const roomService = new RoomServiceClient(
-  LIVEKIT_URL.replace(/^ws/, 'http'),
-  LIVEKIT_API_KEY,
-  LIVEKIT_API_SECRET,
-);
 
 app.get('/v1/debug/rooms/:roomName/participants', authenticate, async (req, res) => {
   try {

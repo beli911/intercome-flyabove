@@ -4,6 +4,18 @@ import SwiftUI
 struct FlyAboveIntercomApp: App {
     @StateObject private var environment = AppEnvironment.live()
 
+    /// Only offered once there is a session: redeeming needs a token.
+    private var invitePresented: Binding<Bool> {
+        Binding(
+            get: {
+                environment.pendingInviteCode != nil
+                    && environment.phase != .signedOut
+                    && environment.phase != .launching
+            },
+            set: { if !$0 { environment.pendingInviteCode = nil } }
+        )
+    }
+
     var body: some Scene {
         WindowGroup {
             Group {
@@ -41,6 +53,16 @@ struct FlyAboveIntercomApp: App {
                 }
             }
             .task { await environment.bootstrap() }
+            .onOpenURL { url in environment.handle(inviteURL: url) }
+            // Presented over whatever is on screen, because an invite can
+            // arrive at any point — including while already in a production.
+            .sheet(isPresented: invitePresented) {
+                InviteRedeemView(
+                    environment: environment,
+                    initialCode: environment.pendingInviteCode ?? "",
+                    onCancel: { environment.pendingInviteCode = nil }
+                )
+            }
         }
     }
 }

@@ -19,7 +19,8 @@ Kliensoldalon:
   intercom főképernyő, crew lista, csatorna beállítás, profil — sötét és
   napfény témával;
 - produkcióválasztó, résztvevőlista jelenléttel, csatornánkénti hangerő;
-- 92 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- meghívó QR/kód és deep link; admin által küldött konfigurációváltás;
+- 109 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa

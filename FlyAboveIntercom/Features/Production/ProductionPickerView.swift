@@ -37,15 +37,21 @@ struct ProductionPickerView: View {
                         .padding(.bottom, 8)
                 }
 
-                BlockButton(
-                    title: environment.isBusy ? "BELÉPÉS…" : "BELÉPÉS ÉLŐBE",
-                    isPrimary: true,
-                    isEnabled: highlighted != nil && !environment.isBusy
-                ) {
-                    guard let id = highlighted,
-                          let production = environment.productions.first(where: { $0.id == id })
-                    else { return }
-                    Task { await environment.selectProduction(production) }
+                HStack(spacing: 10) {
+                    BlockButton(title: "KÓD BEOLVASÁSA") {
+                        // Empty code: the sheet opens on the scanner.
+                        environment.pendingInviteCode = ""
+                    }
+                    BlockButton(
+                        title: environment.isBusy ? "BELÉPÉS…" : "BELÉPÉS ÉLŐBE",
+                        isPrimary: true,
+                        isEnabled: highlighted != nil && !environment.isBusy
+                    ) {
+                        guard let id = highlighted,
+                              let production = environment.productions.first(where: { $0.id == id })
+                        else { return }
+                        Task { await environment.selectProduction(production) }
+                    }
                 }
                 .padding(14)
             }

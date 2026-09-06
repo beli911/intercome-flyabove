@@ -111,6 +111,18 @@ struct CrewMemberDescriptor: Codable, Equatable, Identifiable, Sendable {
     let role: String
 }
 
+/// What an invite code names, before it is spent.
+struct InvitePreview: Decodable, Equatable, Sendable {
+    let code: String
+    let productionId: UUID
+    let productionName: String
+    let expiresAt: Date
+}
+
+struct InviteRedemption: Decodable, Sendable {
+    let production: ProductionSummary
+}
+
 // MARK: - Realtime
 
 /// A LiveKit join credential for exactly one channel.

@@ -431,6 +431,153 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertEqual(subject.activeTalkChannelCount, 1)
     }
 
+    // MARK: - Configuration pushed by the server
+
+    private func descriptor(
+        _ channel: IntercomChannel,
+        canTalk: Bool? = nil,
+        canListen: Bool? = nil,
+        name: String? = nil
+    ) -> ChannelDescriptor {
+        ChannelDescriptor(
+            id: channel.id,
+            name: name ?? channel.name,
+            detail: channel.detail,
+            colorHex: channel.colorHex,
+            canTalk: canTalk ?? channel.canTalk,
+            canListen: canListen ?? channel.canListen,
+            defaultListening: channel.isListening,
+            participantCount: channel.participantCount
+        )
+    }
+
+    func testRevokedTalkSilencesAMicrophoneThatIsOpen() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        subject.talkMode = .latch
+        let channel = subject.configuration.channels[0]
+        subject.requestTalking(true, channelID: channel.id)
+        await subject.waitForTalkWorkToSettle()
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
+
+        // The production takes the line away while the microphone is open.
+        // This is the case the whole push mechanism exists for.
+        await subject.applyUpdatedChannels([
+            descriptor(channel, canTalk: false),
+            descriptor(subject.configuration.channels[1]),
+            descriptor(subject.configuration.channels[2])
+        ])
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        XCTAssertFalse(subject.configuration.channels[0].canTalk)
+        let calls = await transport.talkCallsValue()
+        XCTAssertEqual(calls.last?.enabled, false)
+    }
+
+    func testRevokedListenLeavesTheChannel() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channel = subject.configuration.channels[0]
+        XCTAssertTrue(channel.isListening)
+
+        await subject.applyUpdatedChannels([
+            descriptor(channel, canListen: false),
+            descriptor(subject.configuration.channels[1]),
+            descriptor(subject.configuration.channels[2])
+        ])
+
+        XCTAssertFalse(subject.configuration.channels[0].isListening)
+        let calls = await transport.listenCallsValue()
+        XCTAssertEqual(calls.last?.enabled, false)
+    }
+
+    func testARenamedChannelKeepsTheOperatorsOwnSettings() async {
+        let (subject, _, _) = await makeConnectedSubject()
+        let channel = subject.configuration.channels[2]
+        XCTAssertFalse(channel.isListening)
+        await subject.setVolume(0.5, channelID: channel.id)
+
+        await subject.applyUpdatedChannels([
+            descriptor(subject.configuration.channels[0]),
+            descriptor(subject.configuration.channels[1]),
+            descriptor(channel, name: "Rendező 2")
+        ])
+
+        // The server owns the name; Listen state and level belong to the
+        // operator and must survive a rename.
+        XCTAssertEqual(subject.configuration.channels[2].name, "Rendező 2")
+        XCTAssertFalse(subject.configuration.channels[2].isListening)
+        XCTAssertEqual(subject.configuration.channels[2].volume, 0.5)
+    }
+
+    func testANewChannelFollowsTheServersDefault() async {
+        let (subject, _, _) = await makeConnectedSubject()
+        let newChannel = ChannelDescriptor(
+            id: UUID(),
+            name: "Hang",
+            detail: "FOH",
+            colorHex: "4FD6D2",
+            canTalk: true,
+            canListen: true,
+            defaultListening: true,
+            participantCount: 0
+        )
+
+        await subject.applyUpdatedChannels(
+            subject.configuration.channels.map { descriptor($0) } + [newChannel]
+        )
+
+        XCTAssertEqual(subject.configuration.channels.count, 4)
+        // Granting access mid-show is the production saying "you need to hear
+        // this", and the descriptor has to mean the same thing here as it does
+        // at launch.
+        XCTAssertTrue(subject.configuration.channels[3].isListening)
+        XCTAssertEqual(subject.configuration.channels[3].name, "Hang")
+    }
+
+    func testANewChannelTheServerWantsMutedStaysMuted() async {
+        let (subject, _, _) = await makeConnectedSubject()
+        let quiet = ChannelDescriptor(
+            id: UUID(),
+            name: "Archív",
+            detail: "Nem élő",
+            colorHex: "B36BFF",
+            canTalk: false,
+            canListen: true,
+            defaultListening: false,
+            participantCount: 0
+        )
+
+        await subject.applyUpdatedChannels(
+            subject.configuration.channels.map { descriptor($0) } + [quiet]
+        )
+
+        XCTAssertFalse(subject.configuration.channels[3].isListening)
+    }
+
+    func testARemovedChannelDisappearsAndIsLeft() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let removed = subject.configuration.channels[0]
+
+        await subject.applyUpdatedChannels([
+            descriptor(subject.configuration.channels[1]),
+            descriptor(subject.configuration.channels[2])
+        ])
+
+        XCTAssertEqual(subject.configuration.channels.count, 2)
+        XCTAssertFalse(subject.configuration.channels.contains { $0.id == removed.id })
+        let calls = await transport.listenCallsValue()
+        XCTAssertTrue(calls.contains { $0.channelID == removed.id && !$0.enabled })
+    }
+
+    func testAStaleConfigurationEventReachesTheOwner() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let versions = VersionRecorder()
+        subject.onConfigurationStale = { version in await versions.record(version) }
+
+        await transport.emit(.configurationStale(version: 7))
+
+        await waitUntilAsync { await versions.values() == [7] }
+    }
+
     // MARK: - Audio session events
 
     func testInterruptionStopsTalkingEverywhere() async {
@@ -621,7 +768,13 @@ private actor TransportSpy: IntercomTransport {
 
     func connectCount() -> Int { connects }
     func disconnect() async { disconnects += 1 }
-    func setListening(_: Bool, channelID _: UUID) async throws {}
+    private(set) var listenCalls: [TalkCall] = []
+
+    func setListening(_ enabled: Bool, channelID: UUID) async throws {
+        listenCalls.append(TalkCall(enabled: enabled, channelID: channelID))
+    }
+
+    func listenCallsValue() -> [TalkCall] { listenCalls }
     private(set) var volumes: [UUID: Double] = [:]
     func setVolume(_ volume: Double, channelID: UUID) async throws { volumes[channelID] = volume }
     func volumeValue(_ channelID: UUID) -> Double? { volumes[channelID] }
@@ -723,4 +876,12 @@ private actor AudioSessionSpy: AudioSessionControlling {
 
     func emit(_ event: AudioSessionEvent) { continuation.yield(event) }
     func activatedValue() -> Bool { didActivate }
+}
+
+
+/// Collects the versions handed to `onConfigurationStale`.
+private actor VersionRecorder {
+    private var recorded: [Int] = []
+    func record(_ version: Int) { recorded.append(version) }
+    func values() -> [Int] { recorded }
 }

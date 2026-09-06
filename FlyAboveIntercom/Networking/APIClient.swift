@@ -12,6 +12,8 @@ protocol IntercomAPI: Sendable {
     func productions(accessToken: String) async throws -> [ProductionSummary]
     func channels(productionID: UUID, accessToken: String) async throws -> [ChannelDescriptor]
     func crew(productionID: UUID, accessToken: String) async throws -> [CrewMemberDescriptor]
+    func invitePreview(code: String, accessToken: String) async throws -> InvitePreview
+    func redeemInvite(code: String, accessToken: String) async throws -> ProductionSummary
     func realtimeTokens(
         productionID: UUID,
         channelIDs: [UUID],
@@ -135,6 +137,25 @@ final class HTTPIntercomAPI: IntercomAPI {
             body: Empty?.none,
             accessToken: accessToken
         )
+    }
+
+    func invitePreview(code: String, accessToken: String) async throws -> InvitePreview {
+        try await send(
+            path: "v1/invites/\(InviteCode.normalised(code))",
+            method: "GET",
+            body: Empty?.none,
+            accessToken: accessToken
+        )
+    }
+
+    func redeemInvite(code: String, accessToken: String) async throws -> ProductionSummary {
+        let response: InviteRedemption = try await send(
+            path: "v1/invites/\(InviteCode.normalised(code))/redeem",
+            method: "POST",
+            body: Empty?.none,
+            accessToken: accessToken
+        )
+        return response.production
     }
 
     func realtimeTokens(

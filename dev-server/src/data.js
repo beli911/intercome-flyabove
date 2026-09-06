@@ -65,6 +65,26 @@ export const users = [
   },
 ];
 
+/// Live invites, keyed by code. In-memory like everything else here.
+export const invites = new Map();
+
+/// Bumped whenever a channel changes, so a client can tell whether the
+/// configuration it holds is still current.
+export const configurationVersion = { value: 1 };
+
+/// Ambiguous characters are left out on purpose: these codes get read aloud
+/// over a talkback and typed on a phone in the dark.
+// Must match InviteCode.alphabet on the client, character for character.
+const CODE_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+
+export function generateInviteCode(length = 4) {
+  let code = '';
+  for (let i = 0; i < length; i += 1) {
+    code += CODE_ALPHABET[Math.floor(Math.random() * CODE_ALPHABET.length)];
+  }
+  return invites.has(code) ? generateInviteCode(length) : code;
+}
+
 export function findUserByEmail(email) {
   const normalized = String(email ?? '').trim().toLowerCase();
   return users.find((user) => user.email === normalized);

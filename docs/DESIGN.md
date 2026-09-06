@@ -57,6 +57,9 @@ mondatkezdő nagybetűvel áll; a felhasználónak írt mondatot nem kiabáljuk.
 | Javaslat | Állapot |
 | --- | --- |
 | 1a Bejelentkezés | kész, valódi auth-fal |
+| 1c Meghívókód / QR | kész, QR-olvasóval és deep linkkel |
+| 2a Produkcióválasztó | kész |
+| 2c Crew | kész, valódi jelenléttel |
 | 2b Intercom főképernyő | kész, momentary és latch PTT-vel |
 | 2d Csatorna beállítás | részben: TALK mód, jogosultság, némítás |
 | 2e Profil | részben: identitás, hang, téma, fejlesztői adatok, kijelentkezés |
@@ -66,10 +69,9 @@ mondatkezdő nagybetűvel áll; a felhasználónak írt mondatot nem kiabáljuk.
 A javaslat 13 képernyője közül a többi későbbi mérföldkőhöz tartozik, és a
 backend sem támogatja őket:
 
-- **1b regisztráció, 1c meghívókód/QR** — M2, kell hozzá meghívó-végpont;
-- **2a produkcióválasztó** — M2, a kliens ma az első produkciót veszi;
-- **2c crew lista, beszélőjelzés névvel** — M2, kell hozzá résztvevő-végpont;
-- **3a–3d admin és monitoring** — M2/M3.
+- **1b regisztráció** — nincs önkiszolgáló regisztráció; a hozzáférést admin adja;
+- **1d „adásra kész" ellenőrzőlista** — headset teszt, mikrofonszint;
+- **3a–3d admin és monitoring** — M3.
 
 A `CREW` és `ADMIN` fül látszik a fülsávon, de tiltott és megmondja, melyik
 mérföldkőre vár. Ez őszintébb, mint elrejteni, és őszintébb, mint mintaadattal

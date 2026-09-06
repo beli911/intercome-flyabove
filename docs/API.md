@@ -153,12 +153,72 @@ Minden nem 2xx válasz törzse:
 | `forbidden_channel` | 403 | Nincs jog a csatornához |
 | `production_not_found` | 404 | Nincs ilyen produkció, vagy nem tagja a felhasználó |
 | `not_found` | 404 | Ismeretlen végpont vagy erőforrás |
+| `forbidden` | 403 | A szerep nem elég a művelethez |
+| `invite_not_found` | 404 | Nincs ilyen meghívókód |
+| `invite_expired` | 404 | A meghívó lejárt |
+| `invite_used` | 404 | A meghívót már felhasználták |
 | `rate_limited` | 429 | Túl sok kérés |
 | `internal_error` | 500 | Szerverhiba |
 
 A `message` felhasználónak mutatható, magyar nyelvű szöveg. A kliens a `401`-et
 külön kezeli (munkamenet-frissítés vagy újrabejelentkeztetés), minden mást a
 `message` megjelenítésével.
+
+## Meghívók
+
+Egy meghívó egy produkciót nevez meg, lejár, és egyszer használható. Egy kód,
+ami a műsor után is működik, bejárat annak, akinél megmaradt a csoportos üzenet.
+
+A kódábécé szándékosan hiányos: nincs benne `O`, `I`, `L`, `0` és `1`. Ezeket a
+kódokat talkbacken mondják be és sötétben gépelik. **A kliens és a szerver
+ábécéjének karakterre egyeznie kell** — amit a szerver kiad, de a kliens
+kiszűr, az begépelhetetlen kód.
+
+### `POST /v1/productions/{productionId}/invites`
+
+Csak `supervisor` vagy `admin` szerep. Válasz `201`:
+
+```json
+{
+  "code": "MP9H",
+  "url": "flyabove-intercom://invite/MP9H",
+  "productionId": "…",
+  "productionName": "Reggeli stúdió — 4. blokk",
+  "expiresAt": "2026-09-07T01:04:23.489Z"
+}
+```
+
+### `GET /v1/invites/{code}`
+
+A kód megtekintése beváltás nélkül. A kód kis- és nagybetűvel is elfogadott.
+
+### `POST /v1/invites/{code}/redeem`
+
+Válasz `200`: `{ "production": ProductionSummary }`.
+
+Hibakódok: `invite_not_found`, `invite_expired`, `invite_used`.
+
+## Admin által küldött konfiguráció
+
+### `PATCH /v1/productions/{productionId}/channels/{channelId}`
+
+Csak `supervisor` vagy `admin`. Módosítható: `name`, `detail`, `colorHex`,
+valamint `permissions` felhasználónként (`{ "<userId>": { "canTalk", "canListen" } }`).
+
+A szerver a változás után **minden csatorna LiveKit szobájába** adatüzenetet
+küld:
+
+```json
+{ "type": "configuration", "version": 12, "productionId": "…" }
+```
+
+Az üzenet szándékosan **csak verziót** hordoz, nem magát a konfigurációt: a
+REST végpont marad az egyetlen igazságforrás, és egy kliens, aki lemaradt egy
+üzenetről, a következővel úgyis felzárkózik.
+
+A kliens ezután újraolvassa a csatornákat, és **először a visszavont Talkot
+hallgattatja el** — az operátor épp nyomva tarthatja a gombot, és pontosan ez
+az, amiért ez a push létezik.
 
 ## Fejlesztői referencia-implementáció
 

@@ -28,6 +28,9 @@ final class AppEnvironment: ObservableObject {
     @Published private(set) var productions: [ProductionSummary] = []
     @Published private(set) var selectedProduction: ProductionSummary?
     @Published private(set) var crew: [CrewMember] = []
+    /// Set when the app was opened from an invite link, so the sheet can open
+    /// with the code already in it.
+    @Published var pendingInviteCode: String?
     @Published private(set) var isBusy = false
     @Published var errorMessage: String?
     /// Set when `Info.plist` carries a base URL the app refuses to use.
@@ -162,6 +165,36 @@ final class AppEnvironment: ObservableObject {
         }
     }
 
+    /// An invite link arrived from outside the app.
+    ///
+    /// Signed out, the code is held until there is a session to redeem it with:
+    /// asking someone to re-open a link after logging in is a good way to lose
+    /// them.
+    func handle(inviteURL url: URL) {
+        guard let code = InviteCode.from(url: url) else { return }
+        pendingInviteCode = code
+    }
+
+    /// Redeems an invite code and enters the production it names.
+    func redeemInvite(code: String) async -> Bool {
+        guard let api, let auth else { return false }
+        isBusy = true
+        errorMessage = nil
+        defer { isBusy = false }
+
+        do {
+            let accessToken = try await auth.validAccessToken()
+            let production = try await api.redeemInvite(code: code, accessToken: accessToken)
+            // The roster of productions has just changed under us.
+            productions = try await api.productions(accessToken: accessToken)
+            try await enter(production: production)
+            return true
+        } catch {
+            errorMessage = error.readableMessage
+            return false
+        }
+    }
+
     func selectProduction(_ production: ProductionSummary) async {
         isBusy = true
         errorMessage = nil
@@ -199,16 +232,42 @@ final class AppEnvironment: ObservableObject {
 
         selectedProduction = production
         user = restoredUser
-        intercom = IntercomViewModel(
+        let viewModel = IntercomViewModel(
             configuration: configuration,
             transport: LiveKitIntercomTransport(api: api, auth: auth),
             audioSession: audioSession
         )
+        // The view model does not fetch; it applies. Fetching lives here,
+        // where the API does.
+        viewModel.onConfigurationStale = { [weak self] _ in
+            await self?.refreshConfiguration(productionID: production.id)
+        }
+        intercom = viewModel
         phase = .ready
 
         // The roster is useful even before anyone connects, and a failure to
         // fetch it must not keep the operator off the line.
         await loadCrew(productionID: production.id)
+    }
+
+    /// Re-reads the configuration after the server said ours is stale.
+    ///
+    /// A failure here is not a reason to disturb the operator: the channels
+    /// they have are the ones they were told about, and the next broadcast will
+    /// bring another chance.
+    func refreshConfiguration(productionID: UUID) async {
+        guard let api, let auth, let intercom else { return }
+        do {
+            let accessToken = try await auth.validAccessToken()
+            let descriptors = try await api.channels(
+                productionID: productionID,
+                accessToken: accessToken
+            )
+            await intercom.applyUpdatedChannels(descriptors)
+            await loadCrew(productionID: productionID)
+        } catch {
+            // Left as is on purpose; see above.
+        }
     }
 
     func loadCrew(productionID: UUID) async {

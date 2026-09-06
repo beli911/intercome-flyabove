@@ -230,6 +230,14 @@ private actor StubAPI: IntercomAPI {
 
     func crew(productionID _: UUID, accessToken _: String) async throws -> [CrewMemberDescriptor] { [] }
 
+    func invitePreview(code _: String, accessToken _: String) async throws -> InvitePreview {
+        throw APIError.http(status: 404, code: "invite_not_found", message: nil)
+    }
+
+    func redeemInvite(code _: String, accessToken _: String) async throws -> ProductionSummary {
+        throw APIError.http(status: 404, code: "invite_not_found", message: nil)
+    }
+
     func realtimeTokens(
         productionID _: UUID,
         channelIDs _: [UUID],
