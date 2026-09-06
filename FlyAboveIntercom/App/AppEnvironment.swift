@@ -24,6 +24,8 @@ final class AppEnvironment: ObservableObject {
     @Published private(set) var intercom: IntercomViewModel?
     @Published private(set) var isBusy = false
     @Published var errorMessage: String?
+    /// Set when `Info.plist` carries a base URL the app refuses to use.
+    @Published private(set) var configurationFailure: String?
 
     private let api: (any IntercomAPI)?
     private let auth: AuthService?
@@ -50,14 +52,35 @@ final class AppEnvironment: ObservableObject {
     }
 
     static func live() -> AppEnvironment {
-        let raw = Bundle.main.object(forInfoDictionaryKey: "FlyAboveAPIBaseURL") as? String
-        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseURL = (trimmed?.isEmpty == false) ? URL(string: trimmed!) : nil
-        return AppEnvironment(baseURL: baseURL, deviceName: DeviceNaming.current)
+        let raw = Bundle.main.object(forInfoDictionaryKey: "FlyAboveAPIBaseURL") as? String ?? ""
+        guard !raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            // No server configured: offline demo.
+            return AppEnvironment(baseURL: nil, deviceName: DeviceNaming.current)
+        }
+
+        do {
+            let baseURL = try APIBaseURL.normalised(raw)
+            return AppEnvironment(baseURL: baseURL, deviceName: DeviceNaming.current)
+        } catch {
+            // A misconfigured build must say so, not quietly fall back to the
+            // demo and look like it is working.
+            let environment = AppEnvironment(baseURL: nil, deviceName: DeviceNaming.current)
+            environment.reportConfigurationFailure(error.readableMessage)
+            return environment
+        }
+    }
+
+    private func reportConfigurationFailure(_ message: String) {
+        configurationFailure = message
     }
 
     /// Called once at launch. Restores a Keychain session if there is one.
     func bootstrap() async {
+        if let configurationFailure {
+            phase = .unavailable(message: configurationFailure)
+            return
+        }
+
         guard let auth else {
             intercom = IntercomViewModel(
                 configuration: .demo,
@@ -128,14 +151,15 @@ final class AppEnvironment: ObservableObject {
         }
 
         let descriptors = try await api.channels(productionID: production.id, accessToken: accessToken)
+        let restoredUser = await auth.restoredUser()
         let configuration = IntercomConfiguration(
-            displayName: await auth.currentUser?.displayName ?? production.name,
+            displayName: restoredUser?.displayName ?? production.name,
             productionID: production.id,
             serverURL: nil,
             channels: descriptors.map(IntercomChannel.init(descriptor:))
         )
 
-        user = await auth.currentUser
+        user = restoredUser
         intercom = IntercomViewModel(
             configuration: configuration,
             transport: LiveKitIntercomTransport(api: api, auth: auth),

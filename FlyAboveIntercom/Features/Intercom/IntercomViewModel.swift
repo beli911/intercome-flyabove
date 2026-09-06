@@ -57,7 +57,11 @@ final class IntercomViewModel: ObservableObject {
         case on
         case unknown
     }
-    private var talkWorkers: Set<UUID> = []
+    /// Channel to the session generation its worker belongs to. A forced
+    /// disconnect bumps the generation, and any worker still in flight then
+    /// exits instead of writing state into a session that is gone — or
+    /// blocking the first Talk of the next one.
+    private var talkWorkers: [UUID: Int] = [:]
     /// Talk-all starts one worker per channel; without this they would each
     /// raise their own permission request and their own session activation.
     private var microphoneTask: Task<MicrophoneOutcome, Never>?
@@ -226,19 +230,25 @@ final class IntercomViewModel: ObservableObject {
     }
 
     private func startTalkWorker(channelID: UUID) {
-        guard !talkWorkers.contains(channelID) else { return }
-        talkWorkers.insert(channelID)
+        // An entry from an older generation is stale: its worker is on its way
+        // out and must not stop this one from starting.
+        if let existing = talkWorkers[channelID], existing == sessionGeneration { return }
+        let generation = sessionGeneration
+        talkWorkers[channelID] = generation
         Task { @MainActor [weak self] in
-            await self?.reconcileTalk(channelID: channelID)
+            await self?.reconcileTalk(channelID: channelID, generation: generation)
         }
     }
 
     /// Drives one channel towards its desired state, re-reading that state after
     /// every await so the most recent request always wins.
-    private func reconcileTalk(channelID: UUID) async {
-        defer { talkWorkers.remove(channelID) }
+    private func reconcileTalk(channelID: UUID, generation: Int) async {
+        defer { if talkWorkers[channelID] == generation { talkWorkers[channelID] = nil } }
 
         while true {
+            // Re-checked after every suspension: a fail-safe disconnect on
+            // another channel may have ended this session in the meantime.
+            guard generation == sessionGeneration else { return }
             let desired = desiredTalk[channelID] ?? false
             let applied = appliedTalk[channelID] ?? .off
             // `unknown` is deliberately never "already in the desired state":
@@ -250,7 +260,9 @@ final class IntercomViewModel: ObservableObject {
             // button released while the prompt was up would still open the
             // microphone once the user tapped "Allow".
             if desired, isMicrophoneGranted != true {
-                guard await ensureMicrophoneAccess() else {
+                let granted = await ensureMicrophoneAccess()
+                guard generation == sessionGeneration else { return }
+                guard granted else {
                     clearTalk(channelID: channelID)
                     return
                 }
@@ -259,8 +271,10 @@ final class IntercomViewModel: ObservableObject {
 
             do {
                 try await transport.setTalking(desired, channelID: channelID)
+                guard generation == sessionGeneration else { return }
                 appliedTalk[channelID] = desired ? .on : .off
             } catch {
+                guard generation == sessionGeneration else { return }
                 desiredTalk[channelID] = false
                 setTalkingFlag(false, channelID: channelID)
 

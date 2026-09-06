@@ -341,11 +341,14 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertTrue(prompting)
 
         // The user hangs up while the system prompt is still on screen, then
-        // taps Allow.
-        await subject.disconnect()
+        // taps Allow. The disconnect runs concurrently on purpose: awaiting it
+        // first would block on the still-suspended worker and burn the whole
+        // settle timeout on every run.
+        async let disconnecting: Void = subject.disconnect()
+        try? await Task.sleep(for: .milliseconds(30))
         await audio.unblockPermissionRequest()
+        await disconnecting
         await subject.waitForTalkWorkToSettle()
-        try? await Task.sleep(for: .milliseconds(50))
 
         // Only the playback session from `connect` may have been activated;
         // arming a recording session for a session that is gone would leave the
@@ -369,6 +372,48 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertEqual(subject.activeTalkChannelCount, 0)
         let calls = await transport.talkCallsValue()
         XCTAssertEqual(calls.last?.enabled, false)
+    }
+
+    func testAFailedStopDoesNotLeaveOtherChannelWorkersRunning() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let first = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        let second = try! XCTUnwrap(subject.configuration.channels.dropFirst().first?.id)
+
+        subject.requestTalking(true, channelID: first)
+        subject.requestTalking(true, channelID: second)
+        await subject.waitForTalkWorkToSettle()
+        XCTAssertEqual(subject.activeTalkChannelCount, 2)
+
+        // Hold the second channel's stop in flight while the first one fails.
+        // The fail-safe tears the session down; the late worker must not write
+        // into it afterwards, nor block the next session's first Talk.
+        await transport.failTalkCalls(enabling: false, disabling: true)
+        await transport.blockNextTalkCall()
+        subject.requestTalking(false, channelID: second)
+        let blocked = await transport.waitUntilBlocked()
+        XCTAssertTrue(blocked)
+
+        // Not `setTalking`: that waits for every worker, including the one this
+        // test is deliberately holding, and would burn the settle timeout.
+        subject.requestTalking(false, channelID: first)
+        await waitUntil { subject.connectionState == .disconnected }
+
+        await transport.unblock()
+        await subject.waitForTalkWorkToSettle()
+
+        // The late worker belongs to a session that no longer exists. Without
+        // that binding its own stop also fails, and it tears the transport down
+        // a second time — for a session already gone.
+        let disconnects = await transport.disconnectCount()
+        XCTAssertEqual(disconnects, 1, "Egy elavult worker másodszor is bontott.")
+
+        // A new session must be able to talk immediately: a leftover worker
+        // entry from the dead session would silently swallow the request.
+        await transport.failTalkCalls(enabling: false, disabling: false)
+        await subject.connect()
+        XCTAssertEqual(subject.connectionState, .connected)
+        await subject.setTalking(true, channelID: second)
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
     }
 
     // MARK: - Audio session events

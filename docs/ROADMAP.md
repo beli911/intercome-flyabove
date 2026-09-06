@@ -127,11 +127,44 @@ szerver listájában — a védelem eltávolításával a teszt hatszor hatból 
 Az integrációs teszt így egy valódi, de szűkebb invariánst őriz: párhuzamos
 churn után pontosan egy kapcsolat marad, bontás után egy sem.
 
-Nyitva mindhárom review-ból: reconnect során explicit realtime-token megújítás,
-a felhasználói profil visszatöltése érvényes access token mellett, a bázis-URL
-normalizálása és HTTPS-kényszer éles buildben, valamint a LiveKit-token
-szerveroldali publish-tiltásának end-to-end bizonyítása egy „rosszhiszemű"
-klienssel.
+### Ötödik ellenőrzés ([VERIFICATION_M1_A9B7BD3_2026-09-06.md](VERIFICATION_M1_A9B7BD3_2026-09-06.md))
+
+A 870/870 állításom nem állt: `test-without-building`-gel mértem, az
+ellenőrzés `test`-tel futott, és signal kill lett a vége. Az ok a saját új
+tesztem volt, amely iterációnként elégette az ötmásodperces settle-határidőt.
+Javítva: a bontás párhuzamos taskban fut, a teszt 5,06 s helyett 0,04 s.
+Az azonos paranccsal mért új eredmény **exit 0, 900/900**.
+
+Javítva még:
+
+- **Kényszerbontáskor a többi Talk worker.** A workerek session-generációhoz
+  vannak kötve, és minden felfüggesztés után ellenőrzik. Egy elavult worker
+  így nem ír a megszűnt munkamenetbe, nem indít második kényszerbontást, és
+  nem blokkolja a következő munkamenet első Talkját.
+- A CI felirata már nem „all six"; a darabszám a suite-tal együtt mozog.
+
+### A review-kból nyitva maradt pontok lezárása
+
+- **Realtime-token megújítás.** A transport egy órás grantekkel dolgozik, és
+  lejárat előtt tíz perccel megújítja őket. Egy hosszú kimaradás után
+  újracsatlakozó szoba így nem mutat be olyan tokent, amit a szerver már nem
+  fogad el. Élő teszt fedi.
+- **Helyreállítás leszakadt vonalra.** Ha a LiveKit feladja, a transport friss
+  grantet kér és újra belép, növekvő várakozással, öt próbálkozásig. A teszt a
+  dev-serverrel kilépteti a résztvevőt — ez az egyetlen mód olyan bontást
+  előidézni, amit nem a kliens kért.
+- **Bázis-URL normalizálás és HTTPS-kényszer.** A záró perjel hiánya csendben
+  elnyelte volna az útvonal utolsó elemét; a Release build pedig nem indul el
+  `http://` címmel. Tíz unit teszt fedi.
+- **Profil visszatöltése.** A felhasználó a tokenek mellé kerül a Keychainbe,
+  így egy még érvényes access tokennel induló app is tudja, ki van bejelentkezve
+  — refresh kör nélkül. A régi formátumú tárolt elem továbbra is betöltődik.
+- **A publish-tiltás bizonyítása rosszhiszemű klienssel.** Egy nyers LiveKit
+  `Room` csatlakozik a szerver saját tokenjével, és megpróbál publikálni. A
+  szervernek kell elutasítania — ellenőrizve azzal is, hogy a dev-server
+  ideiglenesen megadott jogánál a teszt elbukik.
+
+Nyitva:
 
 Hátralévő feladat:
 

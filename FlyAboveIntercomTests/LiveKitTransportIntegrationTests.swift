@@ -1,3 +1,4 @@
+import LiveKit
 import XCTest
 @testable import FlyAboveIntercom
 
@@ -245,11 +246,142 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         )
     }
 
+    /// The one test that proves the permission is real.
+    ///
+    /// Every other check stops at the client's own `guard grant.canPublish`,
+    /// which only shows that a cooperative client behaves. Here a bare LiveKit
+    /// room joins with the very token the server minted and tries to publish
+    /// anyway — the way a modified or hostile build would. The server has to be
+    /// the thing that refuses.
+    func testServerRefusesPublishEvenWhenTheClientIgnoresTheGrant() async throws {
+        try await auth.login(email: "kamera@flyabove.hu", password: "flyabove")
+        let accessToken = try await auth.validAccessToken()
+        let productions = try await api.productions(accessToken: accessToken)
+        let production = try XCTUnwrap(productions.first)
+        let descriptors = try await api.channels(productionID: production.id, accessToken: accessToken)
+        let director = try XCTUnwrap(descriptors.first { $0.name == "Rendez\u{0151}" })
+        XCTAssertFalse(director.canTalk)
+
+        let response = try await api.realtimeTokens(
+            productionID: production.id,
+            channelIDs: [director.id],
+            accessToken: accessToken
+        )
+        let grant = try XCTUnwrap(response.grants.first { $0.channelId == director.id })
+        XCTAssertFalse(grant.canPublish)
+
+        // No FlyAbove code in the way: a raw room, the server's own token.
+        let room = Room()
+        try await room.connect(url: response.url.absoluteString, token: grant.token)
+
+        var publishError: (any Error)?
+        do {
+            _ = try await room.localParticipant.setMicrophone(enabled: true)
+        } catch {
+            publishError = error
+        }
+
+        let published = !room.localParticipant.audioTracks.isEmpty
+        // Tear the room down before asserting: a room left connected past the
+        // end of the test drags its disconnect into the next one.
+        await room.disconnect()
+
+        XCTAssertFalse(
+            published,
+            "A szerver \u{00E1}tengedte a publish-t olyan tokennel, ami nem engedi."
+        )
+        XCTAssertNotNil(
+            publishError,
+            "A publish hiba n\u{00E9}lk\u{00FC}l futott le, pedig a token tiltja."
+        )
+    }
+
+    /// Grants live an hour. A room re-joined after a long outage must not
+    /// present a token the server has stopped honouring, so the transport
+    /// renews them well ahead of expiry.
+    func testGrantsAreRenewedBeforeTheyExpire() async throws {
+        let configuration = try await liveConfiguration(email: "operator@flyabove.hu")
+        let counting = CountingAPI(wrapping: api)
+        // A lead time longer than the token's own life makes every grant look
+        // "expiring soon", which is what a real one-hour-old grant would be.
+        let transport = LiveKitIntercomTransport(
+            api: counting,
+            auth: auth,
+            grantRenewalInterval: .milliseconds(300),
+            grantRenewalLeadTime: 24 * 60 * 60
+        )
+        let collector = EventCollector(stream: await transport.events())
+
+        try await transport.connect(configuration: configuration)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected)
+
+        let initial = await counting.realtimeTokenCallCount()
+        try? await Task.sleep(for: .seconds(2))
+        let afterwards = await counting.realtimeTokenCallCount()
+
+        await transport.disconnect()
+        XCTAssertGreaterThan(
+            afterwards,
+            initial,
+            "A transport nem \u{00FA}j\u{00ED}totta meg a lej\u{00E1}rathoz k\u{00F6}zeli granteket."
+        )
+    }
+
+    /// A line the server drops must come back on its own.
+    ///
+    /// Evicting the participant is the only way to produce a disconnect the
+    /// client did not ask for; LiveKit's own reconnect cannot recover from it,
+    /// so this exercises the layer above it.
+    func testAnEvictedChannelRecoversByItself() async throws {
+        let configuration = try await liveConfiguration(email: "operator@flyabove.hu")
+        let transport = LiveKitIntercomTransport(api: api, auth: auth, recoveryAttempts: 5)
+        let collector = EventCollector(stream: await transport.events())
+
+        try await transport.connect(configuration: configuration)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected)
+
+        let channel = try XCTUnwrap(configuration.channels.first { $0.canListen })
+        let production = try XCTUnwrap(configuration.productionID)
+        let roomName = "p_\(production.uuidString.lowercased()).c_\(channel.id.uuidString.lowercased())"
+        let currentUser = await auth.currentUser
+        let identity = try XCTUnwrap(currentUser).id.uuidString.lowercased()
+
+        try await evictParticipant(identity, fromRoom: roomName)
+
+        // Recovery backs off, so give it room: re-mint, rejoin, settle.
+        var recovered = false
+        for _ in 0 ..< 40 {
+            try? await Task.sleep(for: .seconds(1))
+            if try await participantIdentities(inRoom: roomName).contains(identity) {
+                recovered = true
+                break
+            }
+        }
+
+        await transport.disconnect()
+        XCTAssertTrue(recovered, "A kil\u{00E9}ptetett vonal nem \u{00E1}llt helyre mag\u{00E1}t\u{00F3}l.")
+    }
+
     // MARK: - Helpers
 
     private struct DebugParticipants: Decodable {
         struct Participant: Decodable { let identity: String }
         let participants: [Participant]
+    }
+
+    private func evictParticipant(_ identity: String, fromRoom roomName: String) async throws {
+        let accessToken = try await auth.validAccessToken()
+        let encodedRoom = roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomName
+        var request = URLRequest(
+            url: Self.baseURL.appendingPathComponent(
+                "v1/debug/rooms/\(encodedRoom)/participants/\(identity)/remove"
+            )
+        )
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        _ = try await URLSession.intercom.data(for: request)
     }
 
     private func participantIdentities(inRoom roomName: String) async throws -> [String] {
@@ -318,6 +450,49 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         guard (response as? HTTPURLResponse)?.statusCode == 401 else {
             throw XCTSkip("A 8080-as porton nem a fejlesztői intercom API válaszol, a teszt kimarad.")
         }
+    }
+}
+
+/// Counts realtime-token mints without changing behaviour.
+private actor CountingAPI: IntercomAPI {
+    private let wrapped: any IntercomAPI
+    private var realtimeTokenCalls = 0
+
+    init(wrapping wrapped: any IntercomAPI) { self.wrapped = wrapped }
+
+    func realtimeTokenCallCount() -> Int { realtimeTokenCalls }
+
+    func login(email: String, password: String, deviceName: String) async throws -> AuthSessionResponse {
+        try await wrapped.login(email: email, password: password, deviceName: deviceName)
+    }
+
+    func refresh(refreshToken: String) async throws -> AuthSessionResponse {
+        try await wrapped.refresh(refreshToken: refreshToken)
+    }
+
+    func logout(accessToken: String) async throws {
+        try await wrapped.logout(accessToken: accessToken)
+    }
+
+    func productions(accessToken: String) async throws -> [ProductionSummary] {
+        try await wrapped.productions(accessToken: accessToken)
+    }
+
+    func channels(productionID: UUID, accessToken: String) async throws -> [ChannelDescriptor] {
+        try await wrapped.channels(productionID: productionID, accessToken: accessToken)
+    }
+
+    func realtimeTokens(
+        productionID: UUID,
+        channelIDs: [UUID],
+        accessToken: String
+    ) async throws -> RealtimeTokensResponse {
+        realtimeTokenCalls += 1
+        return try await wrapped.realtimeTokens(
+            productionID: productionID,
+            channelIDs: channelIDs,
+            accessToken: accessToken
+        )
     }
 }
 

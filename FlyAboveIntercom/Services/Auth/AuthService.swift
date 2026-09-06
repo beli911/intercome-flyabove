@@ -60,6 +60,13 @@ actor AuthService {
         ((try? loadedTokens()) ?? nil) != nil
     }
 
+    /// The signed-in user, restored from the Keychain when the app was
+    /// relaunched with a token that had not expired.
+    func restoredUser() -> AuthenticatedUser? {
+        _ = try? loadedTokens()
+        return currentUser
+    }
+
     @discardableResult
     func login(email: String, password: String) async throws -> AuthenticatedUser {
         let session = try await api.login(email: email, password: password, deviceName: deviceName)
@@ -136,6 +143,9 @@ actor AuthService {
         if !didLoadFromStore {
             tokens = try store.load()
             didLoadFromStore = true
+            // With a still-valid access token there is never a refresh
+            // response to learn the profile from, so it has to come off disk.
+            if currentUser == nil { currentUser = tokens?.user }
         }
         return tokens
     }

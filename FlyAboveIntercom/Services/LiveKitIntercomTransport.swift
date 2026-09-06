@@ -23,6 +23,11 @@ actor LiveKitIntercomTransport: IntercomTransport {
     private let auth: AuthService
     private let extraIceServers: [IceServer]
     private let statisticsInterval: Duration
+    private let grantRenewalInterval: Duration
+    /// Renew a grant this far before it expires. A room re-joined after a long
+    /// outage must not present a token the server has already stopped honouring.
+    private let grantRenewalLeadTime: TimeInterval
+    private let recoveryAttempts: Int
 
     private var serverURL: URL?
     private var grants: [UUID: RealtimeGrant] = [:]
@@ -47,17 +52,28 @@ actor LiveKitIntercomTransport: IntercomTransport {
     private var sessionGeneration = 0
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
+    private var grantRenewalTask: Task<Void, Never>?
+    /// Per-channel recovery for a room LiveKit has given up on.
+    private var recoveryTasks: [UUID: Task<Void, Never>] = [:]
+    /// Kept so grants can be re-minted without the UI asking.
+    private var configuration: IntercomConfiguration?
 
     init(
         api: any IntercomAPI,
         auth: AuthService,
         extraIceServers: [IceServer] = [],
-        statisticsInterval: Duration = .seconds(2)
+        statisticsInterval: Duration = .seconds(2),
+        grantRenewalInterval: Duration = .seconds(60),
+        grantRenewalLeadTime: TimeInterval = 10 * 60,
+        recoveryAttempts: Int = 5
     ) {
         self.api = api
         self.auth = auth
         self.extraIceServers = extraIceServers
         self.statisticsInterval = statisticsInterval
+        self.grantRenewalInterval = grantRenewalInterval
+        self.grantRenewalLeadTime = grantRenewalLeadTime
+        self.recoveryAttempts = recoveryAttempts
     }
 
     // MARK: - IntercomTransport
@@ -80,6 +96,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
             serverURL = response.url
             grants = Dictionary(uniqueKeysWithValues: response.grants.map { ($0.channelId, $0) })
+            self.configuration = configuration
 
             // Join everything the user is already listening to. Talk-only
             // channels stay unjoined until the Talk button is pressed, so an
@@ -90,6 +107,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
             }
 
             startStatisticsPolling()
+            startGrantRenewal()
             emit(.connectionStateChanged(.connected))
         } catch {
             await teardown()
@@ -244,8 +262,18 @@ actor LiveKitIntercomTransport: IntercomTransport {
     }
 
     private func teardown() async {
+        // Clear intent first: a room disconnecting because we asked it to must
+        // not look like a drop worth recovering from.
+        wantsListening.removeAll()
+        wantsTalking.removeAll()
+        for task in recoveryTasks.values { task.cancel() }
+        recoveryTasks.removeAll()
+
         statisticsTask?.cancel()
         statisticsTask = nil
+        grantRenewalTask?.cancel()
+        grantRenewalTask = nil
+        configuration = nil
         for (channelID, session) in sessions {
             await session.room.disconnect()
             emit(.talkStopped(channelID: channelID))
@@ -260,8 +288,6 @@ actor LiveKitIntercomTransport: IntercomTransport {
         sessions.removeAll()
         roomStates.removeAll()
         grants.removeAll()
-        wantsListening.removeAll()
-        wantsTalking.removeAll()
         serverURL = nil
     }
 
@@ -276,6 +302,12 @@ actor LiveKitIntercomTransport: IntercomTransport {
                 // keep claiming we are on air.
                 wantsTalking.remove(channelID)
                 emit(.talkStopped(channelID: channelID))
+            }
+            if link == .disconnected {
+                // LiveKit has exhausted its own reconnect attempts. If we still
+                // want this line, the most likely reason a rejoin would fail is
+                // a stale grant, so recovery re-mints before trying again.
+                scheduleRecovery(channelID: channelID)
             }
             emit(.connectionStateChanged(aggregatedConnectionState()))
         case let .participantCount(count):
@@ -297,6 +329,85 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
     private func emit(_ event: IntercomTransportEvent) {
         for continuation in continuations.values { continuation.yield(event) }
+    }
+
+    // MARK: - Grants and recovery
+
+    private func startGrantRenewal() {
+        grantRenewalTask?.cancel()
+        let interval = grantRenewalInterval
+        grantRenewalTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard !Task.isCancelled else { return }
+                await self?.renewGrantsIfExpiringSoon()
+            }
+        }
+    }
+
+    private func renewGrantsIfExpiringSoon() async {
+        let threshold = Date().addingTimeInterval(grantRenewalLeadTime)
+        guard grants.values.contains(where: { $0.expiresAt <= threshold }) else { return }
+        await renewGrants()
+    }
+
+    /// Re-mints every grant for the current production.
+    ///
+    /// A failure is not fatal: the existing grants stay in place and the next
+    /// tick tries again. Losing them would turn a recoverable outage into a
+    /// forced re-login.
+    @discardableResult
+    private func renewGrants() async -> Bool {
+        guard let configuration, let productionID = configuration.productionID else { return false }
+        do {
+            let accessToken = try await auth.validAccessToken()
+            let response = try await api.realtimeTokens(
+                productionID: productionID,
+                channelIDs: configuration.channels.map(\.id),
+                accessToken: accessToken
+            )
+            serverURL = response.url
+            for grant in response.grants { grants[grant.channelId] = grant }
+            return true
+        } catch {
+            return false
+        }
+    }
+
+    private func scheduleRecovery(channelID: UUID) {
+        guard recoveryTasks[channelID] == nil else { return }
+        guard wantsListening.contains(channelID) || wantsTalking.contains(channelID) else { return }
+        recoveryTasks[channelID] = Task { [weak self] in
+            await self?.recover(channelID: channelID)
+        }
+    }
+
+    /// Rebuilds a channel LiveKit could not hold, with a fresh grant and
+    /// widening backoff.
+    private func recover(channelID: UUID) async {
+        defer { recoveryTasks[channelID] = nil }
+
+        var delay = Duration.seconds(1)
+        for _ in 0 ..< recoveryAttempts {
+            guard wantsListening.contains(channelID) || wantsTalking.contains(channelID) else { return }
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            delay = min(delay * 2, .seconds(16))
+
+            await renewGrants()
+            await leave(channelID: channelID)
+            do {
+                try await join(channelID: channelID)
+                emit(.connectionStateChanged(aggregatedConnectionState()))
+                return
+            } catch {
+                continue
+            }
+        }
+
+        emit(.connectionStateChanged(.failed(
+            message: "Egy vonal nem állítható helyre. Bontsd és csatlakozz újra."
+        )))
     }
 
     // MARK: - Statistics

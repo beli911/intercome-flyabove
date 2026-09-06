@@ -250,6 +250,17 @@ app.get('/v1/debug/rooms/:roomName/participants', authenticate, async (req, res)
   }
 });
 
+/// Evicts a participant, so a test can produce the one thing it cannot fake:
+/// a room the client did not choose to leave.
+app.post('/v1/debug/rooms/:roomName/participants/:identity/remove', authenticate, async (req, res) => {
+  try {
+    await roomService.removeParticipant(req.params.roomName, req.params.identity);
+    return res.status(204).end();
+  } catch (error) {
+    return fail(res, 404, 'not_found', String(error?.message ?? error));
+  }
+});
+
 // MARK: - Fallbacks
 
 app.use((_req, res) => fail(res, 404, 'not_found', 'Ismeretlen végpont.'));

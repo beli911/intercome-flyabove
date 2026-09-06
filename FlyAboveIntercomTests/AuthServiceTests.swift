@@ -123,6 +123,33 @@ final class AuthServiceTests: XCTestCase {
         }
     }
 
+    func testProfileIsRestoredFromTheStoreWithoutARefresh() async throws {
+        // Relaunch with a token that has not expired: there is no refresh
+        // response to learn the profile from, so it has to come off disk.
+        let api = StubAPI()
+        let epoch = epoch
+        let store = InMemoryTokenStore()
+        let first = makeService(api: api, store: store, now: { epoch })
+        try await first.login(email: "a@b.hu", password: "secret")
+
+        let second = makeService(api: api, store: store, now: { epoch })
+        let user = await second.restoredUser()
+
+        XCTAssertEqual(user?.email, "a@b.hu")
+        XCTAssertEqual(user?.displayName, "Teszt Oper\u{00E1}tor")
+        let refreshCount = await api.refreshCount()
+        XCTAssertEqual(refreshCount, 0)
+    }
+
+    func testStoredSessionFromAnOlderBuildStillLoads() throws {
+        // An item written before the profile was stored must not force a
+        // re-login; it simply has no user yet.
+        let json = #"{"accessToken":"a","refreshToken":"r","accessTokenExpiresAt":"2026-09-06T10:00:00.000Z"}"#
+        let tokens = try JSONDecoder.intercom.decode(AuthTokens.self, from: Data(json.utf8))
+        XCTAssertEqual(tokens.accessToken, "a")
+        XCTAssertNil(tokens.user)
+    }
+
     func testLogoutClearsStore() async throws {
         let api = StubAPI()
         let store = InMemoryTokenStore()

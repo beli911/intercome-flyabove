@@ -18,6 +18,73 @@ protocol IntercomAPI: Sendable {
     ) async throws -> RealtimeTokensResponse
 }
 
+enum APIBaseURLError: LocalizedError, Equatable {
+    case notHTTP(scheme: String?)
+    case insecureInRelease(host: String?)
+    case malformed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .notHTTP(scheme):
+            "A szerver címe nem HTTP(S): \(scheme ?? "hiányzó séma")."
+        case let .insecureInRelease(host):
+            "Éles buildben csak HTTPS engedélyezett (\(host ?? "ismeretlen hoszt"))."
+        case let .malformed(raw):
+            "A szerver címe hibás: \(raw)"
+        }
+    }
+}
+
+enum APIBaseURL {
+    /// Parses and normalises the configured base URL.
+    ///
+    /// Two things matter here. The trailing slash: `URL(string:relativeTo:)`
+    /// drops the last path component when it is missing, so
+    /// `https://host/api` + `v1/auth/login` silently becomes
+    /// `https://host/v1/auth/login`. And the scheme: development talks to a
+    /// LAN server over plain HTTP, but a release build must never do that.
+    static func normalised(
+        _ raw: String,
+        allowInsecure: Bool = APIBaseURL.allowsInsecureByDefault
+    ) throws -> URL {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, var components = URLComponents(string: trimmed) else {
+            throw APIBaseURLError.malformed(raw)
+        }
+
+        let scheme = components.scheme?.lowercased()
+        guard scheme == "https" || scheme == "http" else {
+            throw APIBaseURLError.notHTTP(scheme: components.scheme)
+        }
+        guard let host = components.host, !host.isEmpty else {
+            throw APIBaseURLError.malformed(raw)
+        }
+        if scheme == "http", !allowInsecure {
+            throw APIBaseURLError.insecureInRelease(host: host)
+        }
+
+        components.scheme = scheme
+        if !components.path.hasSuffix("/") {
+            components.path += "/"
+        }
+        // A base URL carries no query or fragment; keeping them would corrupt
+        // every path built from it.
+        components.query = nil
+        components.fragment = nil
+
+        guard let url = components.url else { throw APIBaseURLError.malformed(raw) }
+        return url
+    }
+
+    static var allowsInsecureByDefault: Bool {
+        #if DEBUG
+        true
+        #else
+        false
+        #endif
+    }
+}
+
 final class HTTPIntercomAPI: IntercomAPI {
     private let baseURL: URL
     private let session: URLSession

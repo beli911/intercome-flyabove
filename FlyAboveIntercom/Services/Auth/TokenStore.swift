@@ -10,9 +10,26 @@ struct AuthTokens: Codable, Equatable, Sendable {
     var accessToken: String
     var refreshToken: String
     var accessTokenExpiresAt: Date
+    /// Stored alongside the tokens so a restarted app knows who is signed in
+    /// without waiting for a refresh round trip — with a still-valid access
+    /// token there is no such round trip at all. Optional so an item written by
+    /// an earlier build still decodes instead of forcing a re-login.
+    var user: AuthenticatedUser?
 
     /// Treats a token that expires within `leeway` as already expired so a
     /// refresh happens before a request can fail mid-flight.
+    init(
+        accessToken: String,
+        refreshToken: String,
+        accessTokenExpiresAt: Date,
+        user: AuthenticatedUser? = nil
+    ) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.accessTokenExpiresAt = accessTokenExpiresAt
+        self.user = user
+    }
+
     func isExpired(now: Date = .now, leeway: TimeInterval = 60) -> Bool {
         now.addingTimeInterval(leeway) >= accessTokenExpiresAt
     }

@@ -77,7 +77,8 @@ struct AuthSessionResponse: Decodable, Sendable {
         AuthTokens(
             accessToken: accessToken,
             refreshToken: refreshToken,
-            accessTokenExpiresAt: now.addingTimeInterval(expiresIn)
+            accessTokenExpiresAt: now.addingTimeInterval(expiresIn),
+            user: user
         )
     }
 }

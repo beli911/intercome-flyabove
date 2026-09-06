@@ -17,7 +17,7 @@ Kliensoldalon:
 - RTT/bitráta overlay fejlesztői módban;
 - a mobil UX javaslat vizuális rendszere: bejelentkezés, intercom főképernyő,
   csatorna beállítás, profil — sötét és napfény témával;
-- 64 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- 79 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
