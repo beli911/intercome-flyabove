@@ -91,6 +91,49 @@ final class IntercomViewModelTests: XCTestCase {
         }
     }
 
+    func testLateConnectedEventDoesNotResurrectADisconnectedSession() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        await subject.disconnect()
+        XCTAssertEqual(subject.connectionState, .disconnected)
+
+        // A LiveKit delegate callback that was already in flight when the user
+        // hit disconnect. It must not light the UI back up.
+        await transport.emit(.connectionStateChanged(.connected))
+
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(subject.connectionState, .disconnected)
+    }
+
+    func testLateParticipantEventIsIgnoredAfterDisconnect() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        await subject.disconnect()
+
+        await transport.emit(.participantCountChanged(channelID: channelID, count: 99))
+
+        try? await Task.sleep(for: .milliseconds(100))
+        XCTAssertNotEqual(subject.configuration.channels[0].participantCount, 99)
+    }
+
+    func testRapidTalkTogglesEndWithTheMicrophoneOff() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        // The transport is slow enough that unserialised tasks would finish out
+        // of order, which is exactly what a press-and-drag used to produce.
+        await transport.setTalkDelay(.milliseconds(30))
+
+        async let first: Void = subject.setTalking(true, channelID: channelID)
+        async let second: Void = subject.setTalking(true, channelID: channelID)
+        async let third: Void = subject.setTalking(false, channelID: channelID)
+        _ = await (first, second, third)
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        let calls = await transport.talkCallsValue()
+        XCTAssertEqual(calls.last?.enabled, false, "A mikrofon bekapcsolva maradt a felengedés után.")
+        // The duplicate press must not reach the transport twice.
+        XCTAssertEqual(calls.filter(\.enabled).count, 1)
+    }
+
     // MARK: - Audio session events
 
     func testInterruptionStopsTalkingEverywhere() async {
@@ -233,6 +276,7 @@ private actor TransportSpy: IntercomTransport {
 
     private(set) var didConnect = false
     private(set) var talkCalls: [TalkCall] = []
+    private var talkDelay: Duration = .zero
     private let stream: AsyncStream<IntercomTransportEvent>
     private let continuation: AsyncStream<IntercomTransportEvent>.Continuation
 
@@ -244,7 +288,10 @@ private actor TransportSpy: IntercomTransport {
     func disconnect() async {}
     func setListening(_: Bool, channelID _: UUID) async throws {}
 
+    func setTalkDelay(_ delay: Duration) { talkDelay = delay }
+
     func setTalking(_ enabled: Bool, channelID: UUID) async throws {
+        if talkDelay > .zero { try? await Task.sleep(for: talkDelay) }
         talkCalls.append(TalkCall(enabled: enabled, channelID: channelID))
     }
 

@@ -62,6 +62,11 @@ private struct TalkButton: View {
     let tint: Color
     let onChanged: (Bool) -> Void
 
+    /// The gesture must not key off `isTalking`: that value only changes after
+    /// the transport call round-trips, so during a fast press-and-drag every
+    /// `onChanged` would still see `false` and fire another "start talking".
+    @State private var isPressed = false
+
     var body: some View {
         Text(isTalking ? "BESZÉLSZ" : "TALK")
             .font(.headline)
@@ -72,9 +77,14 @@ private struct TalkButton: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { _ in
-                        if !isTalking { onChanged(true) }
+                        guard !isPressed else { return }
+                        isPressed = true
+                        onChanged(true)
                     }
-                    .onEnded { _ in onChanged(false) }
+                    .onEnded { _ in
+                        isPressed = false
+                        onChanged(false)
+                    }
             )
             .accessibilityAddTraits(.isButton)
             .accessibilityLabel("Beszéd: \(isTalking ? "bekapcsolva" : "kikapcsolva")")

@@ -15,6 +15,10 @@ final class IntercomViewModel: ObservableObject {
     private let transport: any IntercomTransport
     private let audioSession: any AudioSessionControlling
     private var observationTasks: [Task<Void, Never>] = []
+    /// Serialises Talk changes per channel. A press-and-drag produces several
+    /// gesture callbacks, and unordered tasks could leave the microphone on
+    /// after the finger has left the button.
+    private var talkTasks: [UUID: Task<Void, Never>] = [:]
     /// Channels the user was talking on when an interruption hit, so the Talk
     /// state can be restored if the interruption ends cleanly.
     private var talkChannelsBeforeInterruption: [UUID] = []
@@ -70,6 +74,7 @@ final class IntercomViewModel: ObservableObject {
 
     func disconnect() async {
         await stopTalkingEverywhere()
+        cancelTalkTasks()
         await transport.disconnect()
         await audioSession.deactivate()
         statistics = nil
@@ -91,12 +96,25 @@ final class IntercomViewModel: ObservableObject {
     }
 
     func setTalking(_ enabled: Bool, channelID: UUID) async {
+        // Chain behind whatever is already in flight for this channel, so the
+        // release always lands after the press it belongs to.
+        let previousTask = talkTasks[channelID]
+        let task = Task { @MainActor [weak self] in
+            await previousTask?.value
+            await self?.applyTalking(enabled, channelID: channelID)
+        }
+        talkTasks[channelID] = task
+        await task.value
+    }
+
+    private func applyTalking(_ enabled: Bool, channelID: UUID) async {
         guard let index = channelIndex(for: channelID), isConnected else { return }
         guard configuration.channels[index].canTalk else {
             errorMessage = IntercomTransportError.notPermittedToTalk.errorDescription
             return
         }
         let previous = configuration.channels[index].isTalking
+        guard previous != enabled else { return }
         configuration.channels[index].isTalking = enabled
 
         do {
@@ -128,11 +146,14 @@ final class IntercomViewModel: ObservableObject {
     }
 
     private func apply(_ event: IntercomTransportEvent) {
+        // LiveKit delegates fire on their own queues, so an event can land after
+        // the user has already disconnected. Nothing from a torn-down session
+        // may touch the UI — otherwise a late `.connected` lights it back up,
+        // or a stale participant count contradicts an empty screen.
+        guard connectionState != .disconnected else { return }
+
         switch event {
         case let .connectionStateChanged(state):
-            // A transport-driven `.connected` must not resurrect a session the
-            // user has already torn down.
-            if case .disconnected = state, connectionState == .disconnected { return }
             connectionState = state
             if case let .failed(message) = state { errorMessage = message }
 
@@ -199,6 +220,11 @@ final class IntercomViewModel: ObservableObject {
             configuration.channels[index].isTalking = false
             try? await transport.setTalking(false, channelID: channelID)
         }
+    }
+
+    private func cancelTalkTasks() {
+        for task in talkTasks.values { task.cancel() }
+        talkTasks.removeAll()
     }
 
     private func fail(with error: any Error, preservingConnection: Bool = false) {

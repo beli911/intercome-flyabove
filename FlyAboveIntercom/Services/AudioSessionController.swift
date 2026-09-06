@@ -42,10 +42,12 @@ enum AudioSessionError: LocalizedError {
 
 final class AudioSessionController: AudioSessionControlling, @unchecked Sendable {
     private let lock = NSLock()
+    private let notificationCenter: NotificationCenter
     private var continuations: [UUID: AsyncStream<AudioSessionEvent>.Continuation] = [:]
     private var observers: [any NSObjectProtocol] = []
 
     init(notificationCenter: NotificationCenter = .default) {
+        self.notificationCenter = notificationCenter
         let session = AVAudioSession.sharedInstance()
 
         observers.append(notificationCenter.addObserver(
@@ -94,8 +96,10 @@ final class AudioSessionController: AudioSessionControlling, @unchecked Sendable
     }
 
     deinit {
+        // Must be the injected centre, not `.default`: otherwise an observer
+        // registered on a test's own centre is never removed.
         for observer in observers {
-            NotificationCenter.default.removeObserver(observer)
+            notificationCenter.removeObserver(observer)
         }
         lock.withLock {
             for continuation in continuations.values { continuation.finish() }

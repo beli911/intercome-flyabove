@@ -29,6 +29,25 @@ csatorna elutasítása, és két kliens egymás látása a közös csatornán.
 
 Fejlesztői backend: [dev-server/](../dev-server/) — nem éles.
 
+A 2026-09-06-i független ellenőrzés ([docs/REVIEW_M1_2026-09-06.md](REVIEW_M1_2026-09-06.md))
+P1–P3 pontjaiból javítva, mindegyik regressziós teszttel:
+
+- PTT eseménysorrend: a gesztus saját lenyomás-állapotából dolgozik, nem a
+  késleltetve renderelt értékből, és a Talk-hívások csatornánként sorosak
+- bontás után érkező transport-esemény nem élesztheti újra a UI-t
+- Listen kikapcsolás Talk közben: a transport külön tartja nyilván a kívánt
+  Listen és Talk állapotot, és a szobát akkor engedi el, amikor egyik sem kéri
+- induláskori átmeneti szerverhiba nem törli a munkamenetet — új
+  `unavailable` fázis „Újra" gombbal
+- többszobás kapcsolatállapot aggregálása: egy csatorna újracsatlakozása
+  látszik akkor is, ha a többi rendben
+- `AudioSessionController` az injektált `NotificationCenter`-ből iratkozik le
+- az integrációs teszt health checkje ellenőrzi a várt `401`-et
+
+Nyitva maradt a review-ból: reconnect során explicit realtime-token megújítás
+(P2), a felhasználói profil visszatöltése érvényes access token mellett (P2),
+és a bázis-URL normalizálása/HTTPS-kényszer éles buildben (P2).
+
 Hátralévő feladat:
 
 - éles LiveKit telepítés vagy LiveKit Cloud projekt, TURN-nel

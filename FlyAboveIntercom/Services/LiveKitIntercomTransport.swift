@@ -27,6 +27,15 @@ actor LiveKitIntercomTransport: IntercomTransport {
     private var serverURL: URL?
     private var grants: [UUID: RealtimeGrant] = [:]
     private var sessions: [UUID: ChannelSession] = [:]
+    /// What the user asked for, as opposed to which rooms happen to be joined.
+    /// A room is kept alive while either flag holds, and released when neither
+    /// does — the two are set from independent UI controls, so neither alone
+    /// can decide the room's fate.
+    private var wantsListening: Set<UUID> = []
+    private var wantsTalking: Set<UUID> = []
+    /// Per-room connection state. One channel reconnecting must not be masked
+    /// by another reporting `.connected`.
+    private var roomStates: [UUID: LiveKit.ConnectionState] = [:]
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
 
@@ -66,6 +75,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
             // channels stay unjoined until the Talk button is pressed, so an
             // idle client holds no peer connection it does not need.
             for channel in configuration.channels where channel.isListening && channel.canListen {
+                wantsListening.insert(channel.id)
                 try await join(channelID: channel.id)
             }
 
@@ -85,13 +95,11 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
     func setListening(_ enabled: Bool, channelID: UUID) async throws {
         if enabled {
+            wantsListening.insert(channelID)
             try await join(channelID: channelID)
-        } else if let session = sessions[channelID] {
-            // Keep the room if we are still publishing into it: leaving would
-            // cut our own Talk off mid-sentence.
-            let isPublishing = !session.room.localParticipant.audioTracks.isEmpty
-            guard !isPublishing else { return }
-            await leave(channelID: channelID)
+        } else {
+            wantsListening.remove(channelID)
+            await releaseRoomIfUnwanted(channelID: channelID)
         }
     }
 
@@ -101,15 +109,35 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
         if enabled {
             // Pressing Talk on a channel we only had a grant for joins it now.
+            wantsTalking.insert(channelID)
             try await join(channelID: channelID)
+        } else {
+            wantsTalking.remove(channelID)
         }
         guard let session = sessions[channelID] else { throw IntercomTransportError.notConnected }
 
         do {
             try await session.room.localParticipant.setMicrophone(enabled: enabled)
         } catch {
+            wantsTalking.remove(channelID)
             throw IntercomTransportError.realtime(message: error.readableMessage)
         }
+
+        if !enabled {
+            // Listen may have been switched off while we were still talking;
+            // that request was deferred, and this is where it comes due.
+            await releaseRoomIfUnwanted(channelID: channelID)
+        }
+    }
+
+    /// Leaves the room once neither Listen nor Talk needs it. Leaving mid-Talk
+    /// would cut the user off in the middle of a sentence, so the decision waits
+    /// until both are settled.
+    private func releaseRoomIfUnwanted(channelID: UUID) async {
+        guard !wantsListening.contains(channelID), !wantsTalking.contains(channelID) else {
+            return
+        }
+        await leave(channelID: channelID)
     }
 
     func events() async -> AsyncStream<IntercomTransportEvent> {
@@ -158,10 +186,12 @@ actor LiveKitIntercomTransport: IntercomTransport {
         }
 
         sessions[channelID] = ChannelSession(room: room, observer: observer, grant: grant)
+        roomStates[channelID] = room.connectionState
         emit(.participantCountChanged(channelID: channelID, count: room.remoteParticipants.count + 1))
     }
 
     private func leave(channelID: UUID) async {
+        roomStates.removeValue(forKey: channelID)
         guard let session = sessions.removeValue(forKey: channelID) else { return }
         await session.room.disconnect()
         emit(.participantCountChanged(channelID: channelID, count: 0))
@@ -176,29 +206,25 @@ actor LiveKitIntercomTransport: IntercomTransport {
             emit(.talkStopped(channelID: channelID))
         }
         sessions.removeAll()
+        roomStates.removeAll()
         grants.removeAll()
+        wantsListening.removeAll()
+        wantsTalking.removeAll()
         serverURL = nil
     }
 
     private func handle(_ signal: RoomSignal, channelID: UUID) {
         switch signal {
         case let .connectionState(state):
-            switch state {
-            case .reconnecting:
-                emit(.connectionStateChanged(.reconnecting))
-                // The publisher transport is gone during a reconnect; the Talk
-                // button must not keep claiming we are on air.
+            guard sessions[channelID] != nil else { return }
+            roomStates[channelID] = state
+            if state == .reconnecting || state == .disconnected {
+                // The publisher transport is gone; the Talk button must not
+                // keep claiming we are on air.
+                wantsTalking.remove(channelID)
                 emit(.talkStopped(channelID: channelID))
-            case .connected:
-                emit(.connectionStateChanged(.connected))
-            case .disconnected:
-                emit(.talkStopped(channelID: channelID))
-                if sessions[channelID] != nil, sessions.count == 1 {
-                    emit(.connectionStateChanged(.disconnected))
-                }
-            default:
-                break
             }
+            emit(.connectionStateChanged(aggregatedConnectionState()))
         case let .participantCount(count):
             emit(.participantCountChanged(channelID: channelID, count: count))
         case let .remoteSpeaking(isSpeaking):
@@ -206,6 +232,19 @@ actor LiveKitIntercomTransport: IntercomTransport {
         case .localAudioUnpublished:
             emit(.talkStopped(channelID: channelID))
         }
+    }
+
+    /// The app is only as connected as its worst room: a single channel
+    /// reconnecting is something the operator needs to see, even if the others
+    /// are fine.
+    private func aggregatedConnectionState() -> ConnectionState {
+        let states = roomStates.values
+        guard !states.isEmpty else { return .disconnected }
+        if states.contains(where: { $0 == .reconnecting || $0 == .connecting }) {
+            return .reconnecting
+        }
+        if states.contains(where: { $0 == .connected }) { return .connected }
+        return .disconnected
     }
 
     private func removeContinuation(_ id: UUID) {

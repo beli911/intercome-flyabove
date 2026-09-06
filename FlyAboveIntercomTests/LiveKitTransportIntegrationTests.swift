@@ -225,12 +225,16 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     private func skipUnlessDevStackIsRunning() async throws {
         var request = URLRequest(url: Self.baseURL.appendingPathComponent("v1/productions"))
         request.timeoutInterval = 2
+        let response: URLResponse
         do {
-            // 401 is the healthy answer here: the endpoint exists and demands a
-            // token. Anything that fails to connect means no dev stack.
-            _ = try await URLSession.intercom.data(for: request)
+            (_, response) = try await URLSession.intercom.data(for: request)
         } catch {
             throw XCTSkip("A dev stack nem fut (dev-server + livekit-server), a teszt kimarad.")
+        }
+        // 401 is the healthy answer: the endpoint exists and demands a token.
+        // Anything else on this port is some other service, not our dev API.
+        guard (response as? HTTPURLResponse)?.statusCode == 401 else {
+            throw XCTSkip("A 8080-as porton nem a fejlesztői intercom API válaszol, a teszt kimarad.")
         }
     }
 }

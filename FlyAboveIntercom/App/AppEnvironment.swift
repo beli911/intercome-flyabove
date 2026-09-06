@@ -12,6 +12,10 @@ final class AppEnvironment: ObservableObject {
     enum Phase: Equatable {
         case launching
         case signedOut
+        /// The stored session is still good, but the server could not be
+        /// reached. Signing the user out here would cost them a password entry
+        /// over a problem that is not theirs.
+        case unavailable(message: String)
         case ready
     }
 
@@ -27,18 +31,22 @@ final class AppEnvironment: ObservableObject {
 
     var isDemoMode: Bool { api == nil }
 
-    init(baseURL: URL?, deviceName: String) {
+    init(api: (any IntercomAPI)?, auth: AuthService?) {
         audioSession = AudioSessionController()
+        self.api = api
+        self.auth = auth
+    }
 
+    convenience init(baseURL: URL?, deviceName: String) {
         guard let baseURL else {
-            api = nil
-            auth = nil
+            self.init(api: nil, auth: nil)
             return
         }
-
         let api = HTTPIntercomAPI(baseURL: baseURL)
-        self.api = api
-        auth = AuthService(api: api, store: KeychainTokenStore(), deviceName: deviceName)
+        self.init(
+            api: api,
+            auth: AuthService(api: api, store: KeychainTokenStore(), deviceName: deviceName)
+        )
     }
 
     static func live() -> AppEnvironment {
@@ -69,11 +77,21 @@ final class AppEnvironment: ObservableObject {
             _ = try await auth.validAccessToken()
             try await loadProduction()
         } catch {
-            // A stored session that no longer works is not an error worth
-            // shouting about at launch; just ask for the password again.
-            await auth.logout()
-            phase = .signedOut
+            if error.isAuthenticationFailure {
+                // The credentials themselves were rejected; asking for the
+                // password again is the only way forward.
+                await auth.logout()
+                phase = .signedOut
+            } else {
+                phase = .unavailable(message: error.readableMessage)
+            }
         }
+    }
+
+    /// Retry after a transient failure, without touching the stored session.
+    func retryBootstrap() async {
+        phase = .launching
+        await bootstrap()
     }
 
     func signIn(email: String, password: String) async {
@@ -124,6 +142,16 @@ final class AppEnvironment: ObservableObject {
             audioSession: audioSession
         )
         phase = .ready
+    }
+}
+
+extension Error {
+    /// True only when the server said our credentials are no good. A timeout or
+    /// a 5xx says nothing about them.
+    var isAuthenticationFailure: Bool {
+        if let apiError = self as? APIError, case .unauthorized = apiError { return true }
+        if let authError = self as? AuthError, case .notAuthenticated = authError { return true }
+        return false
     }
 }
 

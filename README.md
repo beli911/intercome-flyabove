@@ -15,7 +15,7 @@ Kliensoldalon:
 - bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
 - LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
 - RTT/bitráta overlay fejlesztői módban;
-- 35 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- 44 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
