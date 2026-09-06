@@ -25,6 +25,43 @@ indításkor dyld-hibával kilép — új target hozzáadásakor erre figyelj.
 A `LiveKitTransportIntegrationTests` valódi LiveKit szervert igényel; enélkül
 magát kihagyja. Lásd [dev-server/README.md](../dev-server/README.md).
 
+## Futtatás fizikai iPhone-on
+
+A szerver címe nem az `Info.plist`-ben áll, hanem a `FLYABOVE_API_BASE_URL`
+build settingben. Alapértéke üres, ami demó módot jelent; így egyetlen
+környezethez sem kell a plistet szerkeszteni, és nem is kerül véletlenül
+verziókezelésbe egy gépspecifikus IP-cím.
+
+```sh
+scripts/install-device.sh
+```
+
+A script megkeresi a gép LAN-címét, felépíti belőle a szerver URL-jét,
+buildel, telepít és elindít. A címet szándékosan nem rögzíti: hálózatváltáskor
+egy elavult cím a telefonon „a szerver nem érhető el" hibaként jelenik meg, ami
+alkalmazáshibának látszik, pedig konfigurációs.
+
+Előfeltételek, amiket a build nem tud elintézni:
+
+1. **Xcode → Settings → Accounts:** érvényes Apple ID munkamenet. Lejárt
+   munkamenetnél a build `Unable to log in with account` hibával áll meg.
+2. **A telefon** csatlakoztatva, feloldva, és a gépet elfogadva („Trust").
+3. **A dev stack fusson a LAN-on**, különben nincs mihez csatlakozni:
+
+```sh
+livekit-server --dev --bind 0.0.0.0
+```
+
+```sh
+cd dev-server && LIVEKIT_URL=ws://$(ipconfig getifaddr en0):7880 npm start
+```
+
+A telefon és a gép ugyanazon a Wi-Fi-n legyen. A LiveKit `nodeIP` értéke a gép
+LAN-címe kell legyen — enélkül a jelzés létrejön, de a média nem.
+
+Első indításkor a telefon rákérdez a helyi hálózat használatára; enélkül a
+kliens nem éri el a szervert.
+
 ## Projektelvek
 
 - A UI nem hív közvetlenül WebRTC vagy HTTP SDK-t.
