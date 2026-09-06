@@ -245,6 +245,9 @@ final class HTTPIntercomAPI: IntercomAPI {
         do {
             (data, response) = try await session.data(for: request)
         } catch {
+            if let host = baseURL.host, HostAddress.isPrivate(host), HostAddress.isUnreachable(error) {
+                throw APIError.localNetworkUnreachable(host: host)
+            }
             throw APIError.transport(error)
         }
 
@@ -267,6 +270,40 @@ final class HTTPIntercomAPI: IntercomAPI {
         }
 
         return data
+    }
+}
+
+enum HostAddress {
+    /// RFC 1918 and link-local ranges, plus the local-hostname forms. These are
+    /// the addresses a phone can only reach with local network permission.
+    static func isPrivate(_ host: String) -> Bool {
+        let lowered = host.lowercased()
+        if lowered == "localhost" || lowered.hasSuffix(".local") { return true }
+
+        let parts = lowered.split(separator: ".").compactMap { UInt8($0) }
+        guard parts.count == 4 else { return false }
+        switch (parts[0], parts[1]) {
+        case (10, _): return true
+        case (127, _): return true
+        case (192, 168): return true
+        case (169, 254): return true
+        case (172, 16 ... 31): return true
+        default: return false
+        }
+    }
+
+    /// The failures that mean "nothing answered", as opposed to a server that
+    /// answered badly.
+    static func isUnreachable(_ error: any Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .cannotConnectToHost, .cannotFindHost, .timedOut,
+             .networkConnectionLost, .notConnectedToInternet,
+             .dnsLookupFailed, .resourceUnavailable:
+            return true
+        default:
+            return false
+        }
     }
 }
 

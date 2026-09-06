@@ -174,6 +174,10 @@ enum APIError: LocalizedError {
     case unauthorized(code: String?, message: String?)
     case http(status: Int, code: String?, message: String?)
     case transport(any Error)
+    /// A LAN server that will not answer. On a phone this is almost always the
+    /// local network permission or the wrong Wi-Fi — and "network error" sends
+    /// people looking for the bug in the wrong place.
+    case localNetworkUnreachable(host: String)
     case decoding(any Error)
 
     var errorDescription: String? {
@@ -186,6 +190,12 @@ enum APIError: LocalizedError {
             message ?? "A szerver hibát adott (HTTP \(status))."
         case let .transport(error):
             "Hálózati hiba: \(error.localizedDescription)"
+        case let .localNetworkUnreachable(host):
+            """
+            A(z) \(host) nem érhető el. Ellenőrizd, hogy a telefon ugyanazon a \
+            Wi-Fi-n van, mint a szerver, és hogy engedélyezted a helyi hálózat \
+            használatát a Beállításokban.
+            """
         case .decoding:
             "A szerver válasza nem értelmezhető."
         }

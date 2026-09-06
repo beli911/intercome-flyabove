@@ -33,8 +33,13 @@ környezethez sem kell a plistet szerkeszteni, és nem is kerül véletlenül
 verziókezelésbe egy gépspecifikus IP-cím.
 
 ```sh
-scripts/install-device.sh
+scripts/check-device-setup.sh   # megmondja, mi hiányzik
+scripts/install-device.sh       # ha minden megvan
 ```
+
+Az ellenőrző azért van, mert az Xcode hibái ezekre közvetettek: egy párosítatlan
+eszköz „nincs ilyen destination"-ként jelenik meg, egy hiányzó fiók pedig
+„requires a development team"-ként — egyik sem nevezi meg a tényleges teendőt.
 
 A script megkeresi a gép LAN-címét, felépíti belőle a szerver URL-jét,
 buildel, telepít és elindít. A címet szándékosan nem rögzíti: hálózatváltáskor
@@ -60,7 +65,10 @@ A telefon és a gép ugyanazon a Wi-Fi-n legyen. A LiveKit `nodeIP` értéke a g
 LAN-címe kell legyen — enélkül a jelzés létrejön, de a média nem.
 
 Első indításkor a telefon rákérdez a helyi hálózat használatára; enélkül a
-kliens nem éri el a szervert.
+kliens nem éri el a szervert. Ha ezt elutasítod, az app nem általános
+„hálózati hibát" mond, hanem megnevezi a szervert és a két valószínű okot
+(rossz Wi-Fi, vagy hiányzó helyi hálózat engedély) — ez a hiba telefonon
+gyakori, és a szövegétől függ, hogy hol keresi az ember.
 
 ## Projektelvek
 

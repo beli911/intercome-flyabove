@@ -23,7 +23,7 @@ Kliensoldalon:
 - program feed, IFB ducking és prioritás vonal;
 - privát hívás efemer csatornaként;
 - monitor fül: RTT, csomagvesztés, jitter és munkamenet-eseménynapló;
-- 131 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+- 136 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
   integrációs, utóbbi valódi LiveKit szerverrel.
 
 **Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
