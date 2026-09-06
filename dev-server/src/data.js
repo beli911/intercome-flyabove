@@ -18,6 +18,8 @@ export const channels = [
     detail: 'Teljes produkció',
     colorHex: '5B8CFF',
     defaultListening: true,
+    role: 'line',
+    duckDecibels: 12,
   },
   {
     id: '22222222-2222-4222-8222-222222222222',
@@ -25,6 +27,8 @@ export const channels = [
     detail: 'Kameraoperátorok',
     colorHex: '31C48D',
     defaultListening: true,
+    role: 'line',
+    duckDecibels: 12,
   },
   {
     id: '33333333-3333-4333-8333-333333333333',
@@ -32,6 +36,19 @@ export const channels = [
     detail: 'Rendezői vonal',
     colorHex: 'F59E0B',
     defaultListening: false,
+    // The director's line: when this speaks, everything else steps back.
+    role: 'priority',
+    duckDecibels: 12,
+  },
+  {
+    id: '44444444-4444-4444-8444-444444444444',
+    name: 'Program',
+    detail: 'Adáshang',
+    colorHex: '4FD6D2',
+    defaultListening: true,
+    // Programme audio, dipped so a cue can be heard over it.
+    role: 'program',
+    duckDecibels: 15,
   },
 ];
 
@@ -48,6 +65,8 @@ export const users = [
       '11111111-1111-4111-8111-111111111111': { canTalk: true, canListen: true },
       '22222222-2222-4222-8222-222222222222': { canTalk: true, canListen: true },
       '33333333-3333-4333-8333-333333333333': { canTalk: true, canListen: true },
+      // Programme audio is listen-only for everyone.
+      '44444444-4444-4444-8444-444444444444': { canTalk: false, canListen: true },
     },
   },
   {
@@ -61,6 +80,7 @@ export const users = [
       '22222222-2222-4222-8222-222222222222': { canTalk: true, canListen: true },
       // Listens to the director line but may not talk on it.
       '33333333-3333-4333-8333-333333333333': { canTalk: false, canListen: true },
+      '44444444-4444-4444-8444-444444444444': { canTalk: false, canListen: true },
     },
   },
 ];

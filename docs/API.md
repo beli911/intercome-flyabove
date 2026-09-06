@@ -81,10 +81,27 @@ produkciót választja; a választó felület az M2 része.
     "canTalk": true,
     "canListen": true,
     "defaultListening": true,
-    "participantCount": 4
+    "participantCount": 4,
+    "role": "line",
+    "duckDecibels": 12
   }
 ]
 ```
+
+A `role` értéke `line`, `program` vagy `priority`, és a duckolási szabályt
+határozza meg — a produkció így egyszer nyilatkozik a szándékáról, a kliensnek
+nem a nevekből kell kitalálnia:
+
+| role | Mit tesz | Mikor halkul le |
+| --- | --- | --- |
+| `priority` | beszédre lehalkítja a többit | soha |
+| `program` | adáshang | ha a prioritás szól, **vagy** ha a felhasználó beszél |
+| `line` | sima vonal | csak ha a prioritás szól |
+
+A `line` szándékosan **nem** halkul le, amikor a felhasználó beszél: az épp
+azokat némítaná el, akikkel beszél. A `program` viszont igen — ez az IFB.
+
+Mindkét mező elhagyható; hiányában `line` és 12 dB az alapérték.
 
 A `canTalk` / `canListen` a felület számára van: a tényleges kikényszerítés a
 realtime tokenben történik. A `participantCount` induló érték, utána a realtime
@@ -202,7 +219,7 @@ Hibakódok: `invite_not_found`, `invite_expired`, `invite_used`.
 
 ### `PATCH /v1/productions/{productionId}/channels/{channelId}`
 
-Csak `supervisor` vagy `admin`. Módosítható: `name`, `detail`, `colorHex`,
+Csak `supervisor` vagy `admin`. Módosítható: `name`, `detail`, `colorHex`, `role`, `duckDecibels`,
 valamint `permissions` felhasználónként (`{ "<userId>": { "canTalk", "canListen" } }`).
 
 A szerver a változás után **minden csatorna LiveKit szobájába** adatüzenetet

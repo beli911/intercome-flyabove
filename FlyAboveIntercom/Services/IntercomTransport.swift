@@ -49,8 +49,12 @@ protocol IntercomTransport: Sendable {
     func disconnect() async
     func setListening(_ enabled: Bool, channelID: UUID) async throws
     func setTalking(_ enabled: Bool, channelID: UUID) async throws
-    /// Playout gain for one channel, 1.0 being unity.
+    /// Playout gain for one channel, 1.0 being unity. This is the operator's
+    /// own level and is never overwritten by ducking.
     func setVolume(_ volume: Double, channelID: UUID) async throws
+    /// Momentary multiplier applied on top of the operator's level. Kept
+    /// separate so a duck can end without having to remember what the level was.
+    func setDucking(_ multiplier: Double, channelID: UUID) async throws
     /// Long-lived stream of transport-originated updates. Called once per
     /// connection lifetime by the view model.
     ///

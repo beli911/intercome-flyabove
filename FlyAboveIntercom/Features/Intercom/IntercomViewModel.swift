@@ -218,6 +218,9 @@ final class IntercomViewModel: ObservableObject {
             audioRouteName = await audioSession.currentOutputName()
             try await transport.connect(configuration: configuration)
             connectionState = .connected
+            // A programme feed must be at the right level from the first
+            // moment, not from the first time somebody speaks.
+            await updateDucking()
         } catch {
             await audioSession.deactivate()
             fail(with: error)
@@ -267,7 +270,10 @@ final class IntercomViewModel: ObservableObject {
         }
 
         desiredTalk[channelID] = enabled
-        configuration.channels[index].isTalking = enabled
+        // Through `setTalkingFlag`, not inline: that is what recomputes the
+        // ducking, and a programme feed has to dip as the button goes down,
+        // not once the transport has caught up.
+        setTalkingFlag(enabled, channelID: channelID)
         startTalkWorker(channelID: channelID)
     }
 
@@ -370,6 +376,44 @@ final class IntercomViewModel: ObservableObject {
     private func setTalkingFlag(_ value: Bool, channelID: UUID) {
         guard let index = channelIndex(for: channelID) else { return }
         configuration.channels[index].isTalking = value
+        Task { await updateDucking() }
+    }
+
+    /// Applies the ducking rules to every channel.
+    ///
+    /// Idempotent and cheap: the transport ignores a multiplier it already has,
+    /// so this can be called from anywhere the inputs might have moved without
+    /// worrying about how often.
+    func updateDucking() async {
+        let input = DuckingPolicy.Input(
+            isPriorityActive: configuration.channels.contains {
+                $0.role == .priority && $0.isRemoteSpeaking
+            },
+            isSelfTalking: configuration.channels.contains(where: \.isTalking)
+        )
+
+        for channel in configuration.channels {
+            let multiplier = DuckingPolicy.gainMultiplier(
+                for: channel.role,
+                input: input,
+                duckDecibels: channel.duckDecibels
+            )
+            try? await transport.setDucking(multiplier, channelID: channel.id)
+        }
+    }
+
+    /// True while something is stepping back, so the UI can say so rather than
+    /// leaving the operator wondering why a line went quiet.
+    var isDuckingActive: Bool {
+        let input = DuckingPolicy.Input(
+            isPriorityActive: configuration.channels.contains {
+                $0.role == .priority && $0.isRemoteSpeaking
+            },
+            isSelfTalking: configuration.channels.contains(where: \.isTalking)
+        )
+        return configuration.channels.contains {
+            DuckingPolicy.shouldDuck(role: $0.role, input: input)
+        }
     }
 
     private func clearTalk(channelID: UUID) {
@@ -466,6 +510,7 @@ final class IntercomViewModel: ObservableObject {
         case let .remoteSpeakingChanged(channelID, isSpeaking):
             guard let index = channelIndex(for: channelID) else { return }
             configuration.channels[index].isRemoteSpeaking = isSpeaking
+            Task { await updateDucking() }
 
         case let .talkStopped(channelID):
             clearTalk(channelID: channelID)
@@ -519,6 +564,8 @@ final class IntercomViewModel: ObservableObject {
                 channel.colorHex = descriptor.colorHex
                 channel.canTalk = descriptor.canTalk
                 channel.canListen = descriptor.canListen
+                channel.role = descriptor.role ?? .line
+                channel.duckDecibels = descriptor.duckDecibels ?? 12
                 channel.isListening = existing.isListening && descriptor.canListen
                 channel.isTalking = existing.isTalking && descriptor.canTalk
                 merged.append(channel)
@@ -541,6 +588,9 @@ final class IntercomViewModel: ObservableObject {
             appliedTalk[channel.id] = nil
             try? await transport.setListening(false, channelID: channel.id)
         }
+
+        // Roles may have changed with the configuration.
+        await updateDucking()
 
         if !removed.isEmpty || descriptors.count != merged.count {
             errorMessage = nil

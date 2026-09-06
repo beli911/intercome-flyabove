@@ -38,12 +38,21 @@ Alapértelmezés: `http://0.0.0.0:8080`, LiveKit `ws://localhost:7880`.
 
 A telefon nem éri el a `localhost`-ot, ezért a gép LAN-címét kell megadni:
 
-```bash
-# a gép címe, például 192.168.100.43
-ipconfig getifaddr en0
+A szerver magától felderíti a gép LAN-címét, tehát elég:
 
-LIVEKIT_URL=ws://192.168.100.43:7880 npm start
+```bash
+npm start
 ```
+
+Felülírni akkor kell, ha több hálózati interfész van, és nem a jót választja:
+
+```bash
+LIVEKIT_URL=ws://192.168.1.10:7880 npm start
+```
+
+**Hálózatváltás után indítsd újra mindkettőt.** A LiveKit a `nodeIP` értékét
+induláskor rögzíti, és egy elavult cím a kliensen „hálózati hiba"-ként jelenik
+meg 15 másodperc után — ami alkalmazáshibának látszik, pedig nem az.
 
 Az `Info.plist`-ben az `FlyAboveAPIBaseURL` legyen
 `http://192.168.100.43:8080/`. A HTTP-t az `NSAllowsLocalNetworking` kivétel
@@ -60,7 +69,7 @@ környezeti változókat.
 | --- | --- | --- |
 | `PORT` | `8080` | API port |
 | `JWT_SECRET` | `dev-only-secret` | app tokenek aláírása |
-| `LIVEKIT_URL` | `ws://localhost:7880` | amit a kliens megkap |
+| `LIVEKIT_URL` | `ws://<LAN-cím>:7880` | amit a kliens megkap; a LAN-címet magától felderíti |
 | `LIVEKIT_API_KEY` | `devkey` | LiveKit kulcs |
 | `LIVEKIT_API_SECRET` | `secret` | LiveKit titok |
 
@@ -73,6 +82,10 @@ kliens szándékosan átlépi a választót.
 | --- | --- |
 | Bajnokok Ligája — Puskás | operator |
 | Reggeli stúdió — 4. blokk | supervisor |
+
+Csatornák: Mindenki és Kamera (`line`), Rendező (`priority`), Program
+(`program`, mindenkinek csak hallgatható). Így a duckolás minden ága
+végigjátszható.
 
 A csatornák és a névsor mindkettőnél ugyanaz — ez fejlesztői egyszerűsítés,
 nem a szerződés része.

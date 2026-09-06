@@ -6,6 +6,7 @@
 // must never be exposed beyond a development machine.
 
 import crypto from 'node:crypto';
+import os from 'node:os';
 import express from 'express';
 import jwt from 'jsonwebtoken';
 import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
@@ -23,7 +24,21 @@ import {
 
 const PORT = Number(process.env.PORT ?? 8080);
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-only-secret';
-const LIVEKIT_URL = process.env.LIVEKIT_URL ?? 'ws://localhost:7880';
+/// The address handed to clients.
+///
+/// Detected rather than defaulted to localhost: a phone cannot reach the Mac's
+/// loopback, and a hardcoded LAN address goes stale the moment the network
+/// changes — which then looks like a broken app rather than a moved machine.
+function detectLANAddress() {
+  for (const addresses of Object.values(os.networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) return address.address;
+    }
+  }
+  return 'localhost';
+}
+
+const LIVEKIT_URL = process.env.LIVEKIT_URL ?? `ws://${detectLANAddress()}:7880`;
 const LIVEKIT_API_KEY = process.env.LIVEKIT_API_KEY ?? 'devkey';
 // Defaults match `livekit-server --dev`, which prints exactly these.
 const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET ?? 'secret';
@@ -198,6 +213,8 @@ function channelDescriptor(channel, user) {
     canListen,
     defaultListening: channel.defaultListening && canListen,
     participantCount: 0,
+    role: channel.role ?? 'line',
+    duckDecibels: channel.duckDecibels ?? 12,
   };
 }
 
@@ -301,6 +318,8 @@ app.patch('/v1/productions/:productionId/channels/:channelId', authenticate, asy
   if (typeof req.body?.name === 'string') channel.name = req.body.name;
   if (typeof req.body?.detail === 'string') channel.detail = req.body.detail;
   if (typeof req.body?.colorHex === 'string') channel.colorHex = req.body.colorHex;
+  if (['line', 'program', 'priority'].includes(req.body?.role)) channel.role = req.body.role;
+  if (Number.isFinite(req.body?.duckDecibels)) channel.duckDecibels = req.body.duckDecibels;
 
   // Permission changes are the reason this push exists: a revoked Talk has to
   // reach a phone that is holding the button down.

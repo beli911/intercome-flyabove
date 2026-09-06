@@ -133,7 +133,9 @@ private actor StubAPI: IntercomAPI {
                 canTalk: true,
                 canListen: true,
                 defaultListening: true,
-                participantCount: 0
+                participantCount: 0,
+                role: .line,
+                duckDecibels: 12
             )
         ]
     }

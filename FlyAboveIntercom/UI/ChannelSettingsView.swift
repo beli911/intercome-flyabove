@@ -21,6 +21,7 @@ struct ChannelSettingsView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         volumeSection
+                        duckingSection
                         talkModeSection
                         permissionSection
                         pendingSection
@@ -56,10 +57,10 @@ struct ChannelSettingsView: View {
                     .font(DS.display(20, .bold))
                     .foregroundStyle(DS.ink)
                 MonoLabel(
-                    text: "\(channel.detail) · \(channel.participantCount) FŐ",
+                    text: "\(channel.role.title) · \(channel.participantCount) FŐ",
                     size: 11,
                     weight: .regular,
-                    color: DS.ink3
+                    color: channel.role == .priority ? DS.accentText : DS.ink3
                 )
             }
 
@@ -123,6 +124,32 @@ struct ChannelSettingsView: View {
         .overlay { Rectangle().stroke(DS.line, lineWidth: DS.hairline) }
     }
 
+    /// What this channel does to, or suffers from, the others.
+    private var duckingSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            MonoLabel(text: "SZEREP", size: 11, color: DS.ink2)
+            Text(roleExplanation)
+                .font(DS.display(12, .regular))
+                .foregroundStyle(DS.ink3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(12)
+        .background(DS.surface)
+        .overlay { Rectangle().stroke(DS.line, lineWidth: DS.hairline) }
+    }
+
+    private var roleExplanation: String {
+        let amount = Int(channel.duckDecibels.rounded())
+        switch channel.role {
+        case .priority:
+            return "Ha ezen a vonalon valaki beszél, a többi csatorna \(amount) dB-lel lehalkul. Ez a vonal soha nem halkul le."
+        case .program:
+            return "Adáshang. Lehalkul \(amount) dB-lel, ha a prioritás vonal szól, vagy ha te beszélsz."
+        case .line:
+            return "Sima vonal. Csak akkor halkul le \(amount) dB-lel, ha a prioritás vonalon beszélnek."
+        }
+    }
+
     private var talkModeSection: some View {
         VStack(alignment: .leading, spacing: 10) {
             MonoLabel(text: "TALK MÓD", size: 11, color: DS.ink2)
@@ -180,8 +207,8 @@ struct ChannelSettingsView: View {
             MonoLabel(text: "KÉSŐBBI MÉRFÖLDKŐ", size: 11, color: DS.ink2)
 
             VStack(alignment: .leading, spacing: 8) {
-                PendingRow(title: "IFB ducking", milestone: "M3")
-                PendingRow(title: "Prioritás jelzés", milestone: "M3")
+                PendingRow(title: "Private/direct call", milestone: "M3")
+                PendingRow(title: "ATEM tally", milestone: "M3")
             }
             .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)

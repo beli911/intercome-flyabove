@@ -447,7 +447,9 @@ final class IntercomViewModelTests: XCTestCase {
             canTalk: canTalk ?? channel.canTalk,
             canListen: canListen ?? channel.canListen,
             defaultListening: channel.isListening,
-            participantCount: channel.participantCount
+            participantCount: channel.participantCount,
+            role: .line,
+            duckDecibels: 12
         )
     }
 
@@ -518,7 +520,9 @@ final class IntercomViewModelTests: XCTestCase {
             canTalk: true,
             canListen: true,
             defaultListening: true,
-            participantCount: 0
+            participantCount: 0,
+            role: .line,
+            duckDecibels: 12
         )
 
         await subject.applyUpdatedChannels(
@@ -543,7 +547,9 @@ final class IntercomViewModelTests: XCTestCase {
             canTalk: false,
             canListen: true,
             defaultListening: false,
-            participantCount: 0
+            participantCount: 0,
+            role: .line,
+            duckDecibels: 12
         )
 
         await subject.applyUpdatedChannels(
@@ -778,6 +784,9 @@ private actor TransportSpy: IntercomTransport {
     private(set) var volumes: [UUID: Double] = [:]
     func setVolume(_ volume: Double, channelID: UUID) async throws { volumes[channelID] = volume }
     func volumeValue(_ channelID: UUID) -> Double? { volumes[channelID] }
+    private(set) var ducks: [UUID: Double] = [:]
+    func setDucking(_ multiplier: Double, channelID: UUID) async throws { ducks[channelID] = multiplier }
+    func duckValue(_ channelID: UUID) -> Double? { ducks[channelID] }
 
     /// Suspends the next `setTalking` until `unblock()`, so a test can hold the
     /// transport open and act while a call is genuinely in flight.

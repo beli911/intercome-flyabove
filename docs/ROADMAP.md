@@ -191,7 +191,19 @@ szerepel — előrehoztuk, mert a megépített főképernyő része.
 
 ## M3 – Broadcast funkciók
 
-- program feed és IFB/ducking
+Elkészült:
+
+- **program feed és IFB/ducking, prioritás jelzéssel.** A csatorna `role`
+  mezője dönt: a `priority` vonal beszédre lehalkítja a többit és soha nem
+  halkul; a `program` adáshang a prioritásra **és** a saját beszédre is
+  lehalkul (ez az IFB); a `line` csak a prioritásra. A `line` szándékosan nem
+  halkul saját beszédre — az épp azokat némítaná, akikkel beszélünk.
+  A szabály önálló, kimerítően tesztelt függvény; a duckolás a transportban
+  külön szorzó, hogy az operátor beállított szintjét ne írja felül.
+
+Hátralévő:
+
+- ~~program feed és IFB/ducking~~
 - private/direct call
 - ATEM tally
 - Bitfocus Companion/Stream Deck gateway

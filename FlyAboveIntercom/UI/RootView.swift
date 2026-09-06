@@ -135,6 +135,11 @@ struct RootView: View {
         if viewModel.isDeveloperModeEnabled, let statistics = viewModel.statistics {
             parts.append(statistics.roundTripDescription)
         }
+        if viewModel.isDuckingActive {
+            // A line that went quiet on its own needs an explanation, or it
+            // reads as a fault.
+            parts.append("DUCK")
+        }
         if let route = viewModel.audioRouteName {
             parts.append(route.uppercased())
         }

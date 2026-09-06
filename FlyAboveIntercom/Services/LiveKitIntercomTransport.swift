@@ -41,6 +41,9 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// Per-channel playout gain. Kept here because a room that is left and
     /// re-joined would otherwise come back at unity and undo the operator's mix.
     private var volumes: [UUID: Double] = [:]
+    /// Ducking multipliers, kept apart from `volumes` so ending a duck restores
+    /// exactly the level the operator set rather than an approximation of it.
+    private var duckMultipliers: [UUID: Double] = [:]
     /// Per-room connection state. One channel reconnecting must not be masked
     /// by another reporting `.connected`.
     private var roomStates: [UUID: RoomLinkState] = [:]
@@ -177,9 +180,15 @@ actor LiveKitIntercomTransport: IntercomTransport {
         applyVolume(channelID: channelID)
     }
 
+    func setDucking(_ multiplier: Double, channelID: UUID) async throws {
+        guard duckMultipliers[channelID] != multiplier else { return }
+        duckMultipliers[channelID] = multiplier
+        applyVolume(channelID: channelID)
+    }
+
     private func applyVolume(channelID: UUID) {
         guard let session = sessions[channelID] else { return }
-        let volume = volumes[channelID] ?? 1.0
+        let volume = (volumes[channelID] ?? 1.0) * (duckMultipliers[channelID] ?? 1.0)
         for participant in session.room.remoteParticipants.values {
             for publication in participant.audioTracks {
                 (publication.track as? RemoteAudioTrack)?.volume = volume
@@ -287,6 +296,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
         wantsListening.removeAll()
         wantsTalking.removeAll()
         volumes.removeAll()
+        duckMultipliers.removeAll()
         lastConfigurationVersion = 0
         for task in recoveryTasks.values { task.cancel() }
         recoveryTasks.removeAll()

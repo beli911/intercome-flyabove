@@ -101,6 +101,10 @@ struct ChannelDescriptor: Codable, Equatable, Identifiable, Sendable {
     let canListen: Bool
     let defaultListening: Bool
     let participantCount: Int
+    /// Optional so a server that predates ducking still decodes; absent means
+    /// an ordinary line.
+    let role: ChannelRole?
+    let duckDecibels: Double?
 }
 
 /// A member of the production, as the server knows them. Presence is not part

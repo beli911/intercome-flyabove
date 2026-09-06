@@ -35,6 +35,10 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
     /// Playout gain, 1.0 being unity. Per-channel level is how an operator
     /// keeps the director audible under a busy camera line.
     var volume: Double
+    /// What the channel is for; drives the ducking rules.
+    var role: ChannelRole
+    /// How far this channel steps back when it is ducked.
+    var duckDecibels: Double
     /// Who is on this line right now.
     var participants: [ChannelParticipant]
 
@@ -50,6 +54,8 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         canListen: Bool = true,
         isRemoteSpeaking: Bool = false,
         volume: Double = 1.0,
+        role: ChannelRole = .line,
+        duckDecibels: Double = 12,
         participants: [ChannelParticipant] = []
     ) {
         self.id = id
@@ -63,6 +69,8 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
         self.canListen = canListen
         self.isRemoteSpeaking = isRemoteSpeaking
         self.volume = volume
+        self.role = role
+        self.duckDecibels = duckDecibels
         self.participants = participants
     }
 
@@ -75,7 +83,9 @@ struct IntercomChannel: Identifiable, Equatable, Sendable {
             isListening: descriptor.defaultListening && descriptor.canListen,
             participantCount: descriptor.participantCount,
             canTalk: descriptor.canTalk,
-            canListen: descriptor.canListen
+            canListen: descriptor.canListen,
+            role: descriptor.role ?? .line,
+            duckDecibels: descriptor.duckDecibels ?? 12
         )
     }
 }
