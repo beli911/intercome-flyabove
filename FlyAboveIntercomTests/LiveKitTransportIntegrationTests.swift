@@ -185,7 +185,85 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         await firstTransport.disconnect()
     }
 
+    /// Concurrent leave/rejoin must leave the client with exactly one live
+    /// connection, and nothing behind after a disconnect.
+    ///
+    /// A caveat worth stating: this does **not** prove the orphan-room guard in
+    /// `performJoin`. LiveKit evicts an earlier participant with the same
+    /// identity, so a room this client lost track of can never show up as a
+    /// duplicate in the server's participant list. Verified by removing the
+    /// guard: the test still passed six times out of six. The guard is reasoned
+    /// and code-level; observing it needs a hook this suite does not have.
+    func testJoinLeaveRejoinChurnLeavesExactlyOneConnection() async throws {
+        let configuration = try await liveConfiguration(email: "operator@flyabove.hu")
+        let transport = LiveKitIntercomTransport(api: api, auth: auth)
+        let collector = EventCollector(stream: await transport.events())
+
+        try await transport.connect(configuration: configuration)
+        let connected = await collector.waitForConnected(timeout: 20)
+        XCTAssertTrue(connected, "Nem érkezett .connected esemény.")
+
+        let channel = try XCTUnwrap(configuration.channels.first { $0.canTalk && $0.canListen })
+        let production = try XCTUnwrap(configuration.productionID)
+        let roomName = "p_\(production.uuidString.lowercased()).c_\(channel.id.uuidString.lowercased())"
+
+        // Concurrent leave and rejoin, which is what a jittery finger on LISTEN
+        // and TALK produces. Sequential churn would not reproduce this: the race
+        // needs a leave to land while a join is still suspended inside
+        // `room.connect`, so the calls must genuinely overlap.
+        for _ in 0 ..< 6 {
+            async let leaving: Void = transport.setListening(false, channelID: channel.id)
+            async let rejoining: Void = transport.setListening(true, channelID: channel.id)
+            _ = try? await (leaving, rejoining)
+        }
+        // The churn's own outcome is order-dependent and therefore not something
+        // to assert on. Settle it with one explicit join, so the invariant under
+        // test is well defined: whatever happened, we end up with exactly one
+        // connection — not zero, and crucially not an abandoned second one.
+        try await transport.setListening(true, channelID: channel.id)
+        try? await Task.sleep(for: .seconds(2))
+
+        // Ask the server, not the client: an orphan connection is invisible to
+        // the client that lost track of it.
+        let identities = try await participantIdentities(inRoom: roomName)
+        let currentUser = await auth.currentUser
+        let user = try XCTUnwrap(currentUser)
+        XCTAssertEqual(
+            identities.filter { $0 == user.id.uuidString.lowercased() }.count,
+            1,
+            "A szoba több kapcsolatot lát tőlünk: \(identities)"
+        )
+
+        await transport.disconnect()
+
+        // And nothing of ours may survive the disconnect.
+        try? await Task.sleep(for: .seconds(1))
+        let afterDisconnect = try await participantIdentities(inRoom: roomName)
+        XCTAssertFalse(
+            afterDisconnect.contains(user.id.uuidString.lowercased()),
+            "Bontás után is bent maradt egy kapcsolat: \(afterDisconnect)"
+        )
+    }
+
     // MARK: - Helpers
+
+    private struct DebugParticipants: Decodable {
+        struct Participant: Decodable { let identity: String }
+        let participants: [Participant]
+    }
+
+    private func participantIdentities(inRoom roomName: String) async throws -> [String] {
+        let accessToken = try await auth.validAccessToken()
+        let encoded = roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomName
+        var request = URLRequest(
+            url: Self.baseURL.appendingPathComponent("v1/debug/rooms/\(encoded)/participants")
+        )
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        let (data, _) = try await URLSession.intercom.data(for: request)
+        return try JSONDecoder.intercom.decode(DebugParticipants.self, from: data)
+            .participants
+            .map(\.identity)
+    }
 
     private func liveConfiguration(email: String) async throws -> IntercomConfiguration {
         try await auth.login(email: email, password: "flyabove")

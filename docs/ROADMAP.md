@@ -98,6 +98,35 @@ teszt futó LiveKit + dev API mellett, plusz külön 30-szoros PTT stresszjob. A
 job elbukik, ha az integrációs teszt kihagyásra kerül, mert az azt jelentené,
 hogy a stack nem is futott.
 
+### Negyedik ellenőrzés ([VERIFICATION_M1_4669953_2026-09-06.md](VERIFICATION_M1_4669953_2026-09-06.md))
+
+Javítva:
+
+- **A mic-off hibája megkerülte a fail-safe-et.** A `clearTalk` a sikertelen
+  leállítást is `off`-ként könyvelte, így a fail-safe sosem indult el — pont
+  abban az esetben, amire készült. Az alkalmazott állapot mostantól
+  háromértékű (`off`/`on`/`unknown`), és egy sikertelen *leállítás* azonnal
+  kényszerbontást vált ki. Sikertelen *indítás* nem: az nem sugároz semmit.
+- **Engedélykérés alatti bontás.** A permission task session-generációt kap, így
+  egy a rendszerablak alatt bontott munkamenet után nem aktivál felvételre kész
+  audio sessiont.
+- **Háttérbe kerülés** a view modelbe került (`handleSceneActivation`), így
+  tesztelhető, nem csak egy SwiftUI módosító.
+- **CI:** `defaults.run.shell: bash` a `pipefail` miatt — enélkül a
+  `xcodebuild | tee` a `tee` kilépési kódját adta volna vissza. Az integrációs
+  tesztek darabszáma kikényszerítve, xcresult bundle megőrizve.
+
+Új tesztek: sikertelen mic-off kényszerbont, sikertelen mic-on nem, bontás az
+engedélyablak alatt nem élesíti a felvételt, háttérbe kerülés elenged, és egy
+élő join/leave/rejoin integrációs teszt.
+
+**Amit nem sikerült igazolni:** az árva szoba elleni védelem kódszinten megvan,
+de tesztelni nem tudtam. A LiveKit azonos identitás esetén kilépteti a korábbi
+résztvevőt, ezért egy elhagyott kapcsolat soha nem jelenik meg duplikátumként a
+szerver listájában — a védelem eltávolításával a teszt hatszor hatból átment.
+Az integrációs teszt így egy valódi, de szűkebb invariánst őriz: párhuzamos
+churn után pontosan egy kapcsolat marad, bontás után egy sem.
+
 Nyitva mindhárom review-ból: reconnect során explicit realtime-token megújítás,
 a felhasználói profil visszatöltése érvényes access token mellett, a bázis-URL
 normalizálása és HTTPS-kényszer éles buildben, valamint a LiveKit-token

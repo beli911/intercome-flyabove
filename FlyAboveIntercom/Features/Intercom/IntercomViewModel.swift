@@ -44,7 +44,19 @@ final class IntercomViewModel: ObservableObject {
     /// change is never applied directly: the request is recorded synchronously
     /// and a per-channel worker drives the transport towards it.
     private var desiredTalk: [UUID: Bool] = [:]
-    private var appliedTalk: [UUID: Bool] = [:]
+    /// What the transport has been told. `unknown` matters: a failed *stop* is
+    /// not a stop, and recording it as `off` is how a stuck microphone slips
+    /// past the fail-safe.
+    private var appliedTalk: [UUID: AppliedTalk] = [:]
+    /// Incremented by every connect and disconnect, so a permission prompt that
+    /// resolves after the user left cannot act on a session that is gone.
+    private var sessionGeneration = 0
+
+    private enum AppliedTalk: Sendable, Equatable {
+        case off
+        case on
+        case unknown
+    }
     private var talkWorkers: Set<UUID> = []
     /// Talk-all starts one worker per channel; without this they would each
     /// raise their own permission request and their own session activation.
@@ -53,6 +65,8 @@ final class IntercomViewModel: ObservableObject {
     private enum MicrophoneOutcome: Sendable, Equatable {
         case ready
         case denied
+        /// The session was torn down while the system prompt was on screen.
+        case abandoned
         case sessionFailed(String)
     }
 
@@ -106,6 +120,14 @@ final class IntercomViewModel: ObservableObject {
         }
     }
 
+    /// The app left the foreground. A latched microphone must not stay open
+    /// behind another app: the button that would close it is no longer on
+    /// screen.
+    func handleSceneActivation(isActive: Bool) async {
+        guard !isActive else { return }
+        await stopTalkingEverywhere()
+    }
+
     /// Silences every line without leaving them, so nothing is missed on the
     /// way back.
     func setListeningOnAllChannels(_ enabled: Bool) async {
@@ -122,6 +144,7 @@ final class IntercomViewModel: ObservableObject {
 
     func connect() async {
         guard !isBusyConnecting, !isSessionActive else { return }
+        sessionGeneration += 1
         connectionState = .connecting
         errorMessage = nil
 
@@ -141,6 +164,7 @@ final class IntercomViewModel: ObservableObject {
     }
 
     func disconnect() async {
+        sessionGeneration += 1
         await stopTalkingEverywhere()
         await transport.disconnect()
         await audioSession.deactivate()
@@ -216,8 +240,10 @@ final class IntercomViewModel: ObservableObject {
 
         while true {
             let desired = desiredTalk[channelID] ?? false
-            let applied = appliedTalk[channelID] ?? false
-            guard desired != applied else { return }
+            let applied = appliedTalk[channelID] ?? .off
+            // `unknown` is deliberately never "already in the desired state":
+            // it has to be resolved by an actual transport call.
+            guard applied != (desired ? .on : .off) else { return }
 
             // The permission sheet can sit on screen for seconds. Acquire access
             // first, then loop so the desired state is read again — otherwise a
@@ -233,21 +259,52 @@ final class IntercomViewModel: ObservableObject {
 
             do {
                 try await transport.setTalking(desired, channelID: channelID)
-                appliedTalk[channelID] = desired
+                appliedTalk[channelID] = desired ? .on : .off
             } catch {
-                clearTalk(channelID: channelID)
-                fail(with: error, preservingConnection: true)
+                desiredTalk[channelID] = false
+                setTalkingFlag(false, channelID: channelID)
+
+                if desired {
+                    // Failing to open is safe: nothing is being transmitted.
+                    appliedTalk[channelID] = .off
+                    fail(with: error, preservingConnection: true)
+                } else {
+                    // Failing to *close* is the dangerous direction. We do not
+                    // know whether the microphone is still open, so we must
+                    // assume it is.
+                    appliedTalk[channelID] = .unknown
+                    await forceDisconnectForUnstoppableMicrophone()
+                }
                 return
             }
         }
     }
 
-    private func clearTalk(channelID: UUID) {
-        desiredTalk[channelID] = false
-        appliedTalk[channelID] = false
-        if let index = channelIndex(for: channelID) {
+    /// Last resort when a microphone will not close. Dropping the session is
+    /// drastic, but an open microphone nobody can see on a live production is
+    /// worse than a lost connection.
+    private func forceDisconnectForUnstoppableMicrophone() async {
+        errorMessage = "A mikrofon nem állt le, a kapcsolat biztonságból bontásra került."
+        sessionGeneration += 1
+        desiredTalk.removeAll()
+        appliedTalk.removeAll()
+        for index in configuration.channels.indices {
             configuration.channels[index].isTalking = false
         }
+        await transport.disconnect()
+        await audioSession.deactivate()
+        connectionState = .disconnected
+    }
+
+    private func setTalkingFlag(_ value: Bool, channelID: UUID) {
+        guard let index = channelIndex(for: channelID) else { return }
+        configuration.channels[index].isTalking = value
+    }
+
+    private func clearTalk(channelID: UUID) {
+        desiredTalk[channelID] = false
+        appliedTalk[channelID] = .off
+        setTalkingFlag(false, channelID: channelID)
     }
 
     /// Asks for the microphone the first time the user actually wants to speak,
@@ -258,10 +315,13 @@ final class IntercomViewModel: ObservableObject {
         var isOwner = false
         if microphoneTask == nil {
             let audioSession = audioSession
-            microphoneTask = Task { @MainActor in
+            let generation = sessionGeneration
+            microphoneTask = Task { @MainActor [weak self] in
                 guard await audioSession.requestMicrophonePermission() else { return .denied }
-                // Listening ran on a playback-only session; speaking needs the
-                // record category.
+                // The system prompt can stay up indefinitely. If the user hung
+                // up while it was there, activating a recording session now
+                // would arm a microphone for a session that no longer exists.
+                guard let self, self.sessionGeneration == generation else { return .abandoned }
                 do {
                     try await audioSession.activate(recording: true)
                 } catch {
@@ -285,6 +345,9 @@ final class IntercomViewModel: ObservableObject {
         case .denied:
             isMicrophoneGranted = false
             errorMessage = AudioSessionError.microphonePermissionDenied.errorDescription
+            return false
+        case .abandoned:
+            // The user disconnected on purpose; this is not an error to report.
             return false
         case let .sessionFailed(message):
             errorMessage = message
@@ -385,14 +448,10 @@ final class IntercomViewModel: ObservableObject {
         }
         await waitForTalkWorkToSettle()
 
-        // If a microphone still has not closed, the screen says silent while the
-        // line may not be. Tearing the transport down is drastic, but a stuck
-        // open microphone on a live production is worse than a dropped session.
-        if appliedTalk.values.contains(true) {
-            errorMessage = "A mikrofon nem állt le időben, a kapcsolat bontásra került."
-            appliedTalk.removeAll()
-            await transport.disconnect()
-            connectionState = .disconnected
+        // Anything that is not a confirmed `off` means the screen says silent
+        // while the line may not be.
+        if appliedTalk.values.contains(where: { $0 != .off }) {
+            await forceDisconnectForUnstoppableMicrophone()
         }
     }
 

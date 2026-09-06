@@ -45,9 +45,7 @@ struct RootView: View {
         }
         .preferredColorScheme(viewModel.theme.colorScheme)
         .onChange(of: scenePhase) { _, phase in
-            // A latched microphone must not stay open behind another app: the
-            // button that would close it is no longer on screen.
-            if phase != .active { viewModel.requestTalkingOnAllChannels(false) }
+            Task { await viewModel.handleSceneActivation(isActive: phase == .active) }
         }
         .alert("Hiba", isPresented: errorBinding) {
             Button("Rendben", role: .cancel) { viewModel.errorMessage = nil }

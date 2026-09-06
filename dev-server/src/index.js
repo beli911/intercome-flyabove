@@ -8,7 +8,7 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import jwt from 'jsonwebtoken';
-import { AccessToken } from 'livekit-server-sdk';
+import { AccessToken, RoomServiceClient } from 'livekit-server-sdk';
 import {
   channels,
   findUserByEmail,
@@ -223,6 +223,31 @@ app.post('/v1/productions/:productionId/rt-tokens', authenticate, async (req, re
   }
 
   return res.json({ url: LIVEKIT_URL, grants });
+});
+
+// MARK: - Debug
+//
+// Only the room's real participant list can prove that a join/leave/rejoin
+// churn left no orphan connection behind: an orphan room is invisible to the
+// client that lost track of it. Development server, so this needs no auth
+// beyond the caller already having a session.
+
+const roomService = new RoomServiceClient(
+  LIVEKIT_URL.replace(/^ws/, 'http'),
+  LIVEKIT_API_KEY,
+  LIVEKIT_API_SECRET,
+);
+
+app.get('/v1/debug/rooms/:roomName/participants', authenticate, async (req, res) => {
+  try {
+    const participants = await roomService.listParticipants(req.params.roomName);
+    return res.json({
+      participants: participants.map((p) => ({ identity: p.identity, state: p.state })),
+    });
+  } catch (error) {
+    // A room nobody has joined yet simply does not exist.
+    return res.json({ participants: [] });
+  }
 });
 
 // MARK: - Fallbacks

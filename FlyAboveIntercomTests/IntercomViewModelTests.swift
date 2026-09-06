@@ -293,6 +293,84 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertEqual(subject.connectionState, .reconnecting)
     }
 
+    func testAMicrophoneThatWillNotStopForcesTheSessionDown() async {
+        let (subject, transport, audio) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        await subject.setTalking(true, channelID: channelID)
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
+
+        await transport.failTalkCalls(enabling: false, disabling: true)
+        await subject.setTalking(false, channelID: channelID)
+
+        // The stop failed, so the microphone's real state is unknown. Recording
+        // it as "off" and carrying on would leave an open microphone that
+        // nothing on screen reveals.
+        XCTAssertEqual(subject.connectionState, .disconnected)
+        let disconnects = await transport.disconnectCount()
+        XCTAssertEqual(disconnects, 1)
+        XCTAssertNotNil(subject.errorMessage)
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+    }
+
+    func testAMicrophoneThatWillNotStartKeepsTheSession() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        await transport.failTalkCalls(enabling: true, disabling: false)
+        await subject.setTalking(true, channelID: channelID)
+
+        // Failing to open transmits nothing, so there is nothing to protect
+        // against: report it and stay on the line.
+        XCTAssertEqual(subject.connectionState, .connected)
+        let disconnects = await transport.disconnectCount()
+        XCTAssertEqual(disconnects, 0)
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        XCTAssertNotNil(subject.errorMessage)
+    }
+
+    func testDisconnectDuringThePermissionPromptDoesNotArmRecording() async {
+        let transport = TransportSpy()
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(transport: transport, audioSession: audio)
+        await subject.connect()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        await audio.blockNextPermissionRequest()
+        subject.requestTalking(true, channelID: channelID)
+        let prompting = await audio.waitUntilPrompting()
+        XCTAssertTrue(prompting)
+
+        // The user hangs up while the system prompt is still on screen, then
+        // taps Allow.
+        await subject.disconnect()
+        await audio.unblockPermissionRequest()
+        await subject.waitForTalkWorkToSettle()
+        try? await Task.sleep(for: .milliseconds(50))
+
+        // Only the playback session from `connect` may have been activated;
+        // arming a recording session for a session that is gone would leave the
+        // microphone indicator on with nothing behind it.
+        let recordingModes = await audio.activateRecordingModes()
+        XCTAssertEqual(recordingModes, [false])
+        XCTAssertEqual(subject.connectionState, .disconnected)
+    }
+
+    func testLeavingTheForegroundReleasesTalk() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        subject.talkMode = .latch
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        subject.requestTalking(true, channelID: channelID)
+        await subject.waitForTalkWorkToSettle()
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
+
+        await subject.handleSceneActivation(isActive: false)
+
+        // Nothing on a background screen can close a latched microphone.
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        let calls = await transport.talkCallsValue()
+        XCTAssertEqual(calls.last?.enabled, false)
+    }
+
     // MARK: - Audio session events
 
     func testInterruptionStopsTalkingEverywhere() async {
@@ -455,6 +533,18 @@ private actor TransportSpy: IntercomTransport {
     private var gate: CheckedContinuation<Void, Never>?
     private var blockNext = false
     private var isBlocked = false
+    private var failEnabling = false
+    private var failDisabling = false
+    private(set) var disconnects = 0
+
+    struct TalkFailure: Error {}
+
+    func failTalkCalls(enabling: Bool, disabling: Bool) {
+        failEnabling = enabling
+        failDisabling = disabling
+    }
+
+    func disconnectCount() -> Int { disconnects }
     private let stream: AsyncStream<IntercomTransportEvent>
     private let continuation: AsyncStream<IntercomTransportEvent>.Continuation
 
@@ -470,7 +560,7 @@ private actor TransportSpy: IntercomTransport {
     }
 
     func connectCount() -> Int { connects }
-    func disconnect() async {}
+    func disconnect() async { disconnects += 1 }
     func setListening(_: Bool, channelID _: UUID) async throws {}
 
     /// Suspends the next `setTalking` until `unblock()`, so a test can hold the
@@ -500,6 +590,7 @@ private actor TransportSpy: IntercomTransport {
             await withCheckedContinuation { continuation in gate = continuation }
         }
         talkCalls.append(TalkCall(enabled: enabled, channelID: channelID))
+        if enabled ? failEnabling : failDisabling { throw TalkFailure() }
     }
 
     func events() async -> AsyncStream<IntercomTransportEvent> { stream }
