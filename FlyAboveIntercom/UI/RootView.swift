@@ -9,6 +9,7 @@ struct RootView: View {
 
     @State private var settingsChannelID: UUID?
     @State private var selectedTab: Tab = .lines
+    @Environment(\.scenePhase) private var scenePhase
 
     enum Tab: String, CaseIterable, Identifiable {
         case lines = "VONALAK"
@@ -43,6 +44,11 @@ struct RootView: View {
             }
         }
         .preferredColorScheme(viewModel.theme.colorScheme)
+        .onChange(of: scenePhase) { _, phase in
+            // A latched microphone must not stay open behind another app: the
+            // button that would close it is no longer on screen.
+            if phase != .active { viewModel.requestTalkingOnAllChannels(false) }
+        }
         .alert("Hiba", isPresented: errorBinding) {
             Button("Rendben", role: .cancel) { viewModel.errorMessage = nil }
         } message: {
@@ -79,7 +85,9 @@ struct RootView: View {
 
             Button {
                 Task {
-                    if viewModel.isConnected {
+                    // Reconnecting counts as an active session: the only sensible
+                    // action is to end it, never to start a second one.
+                    if viewModel.isSessionActive {
                         await viewModel.disconnect()
                     } else {
                         await viewModel.connect()
@@ -87,21 +95,21 @@ struct RootView: View {
                 }
             } label: {
                 MonoLabel(
-                    text: viewModel.isConnected ? "BONT" : "BE",
+                    text: viewModel.isSessionActive ? "BONT" : "BE",
                     size: 11,
                     weight: .bold,
-                    color: viewModel.isConnected ? DS.live : DS.onAccent
+                    color: viewModel.isSessionActive ? DS.live : DS.onAccent
                 )
                 .frame(width: DS.iconSize + 14, height: DS.iconSize)
-                .background(viewModel.isConnected ? Color.clear : DS.accent)
+                .background(viewModel.isSessionActive ? Color.clear : DS.accent)
                 .overlay {
-                    if viewModel.isConnected {
+                    if viewModel.isSessionActive {
                         Rectangle().stroke(DS.live, lineWidth: DS.hairline)
                     }
                 }
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.connectionState == .connecting)
+            .disabled(viewModel.isBusyConnecting)
         }
         .padding(.horizontal, 14)
         .padding(.top, 6)

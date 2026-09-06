@@ -1,5 +1,28 @@
 import Foundation
 
+/// One room's link health, expressed without LiveKit's types so the
+/// aggregation rule can be tested on its own.
+enum RoomLinkState: Sendable, Equatable {
+    case connecting
+    case connected
+    case reconnecting
+    case disconnected
+}
+
+enum ConnectionAggregation {
+    /// Green means *every* joined line is up.
+    ///
+    /// A channel that has dropped while the others are fine is exactly the case
+    /// an operator must see: hidden behind a healthy room, it is how a cue gets
+    /// missed. Anything short of all-connected therefore reads as reconnecting.
+    static func state(from rooms: [RoomLinkState]) -> ConnectionState {
+        guard !rooms.isEmpty else { return .disconnected }
+        if rooms.allSatisfy({ $0 == .connected }) { return .connected }
+        if rooms.allSatisfy({ $0 == .disconnected }) { return .disconnected }
+        return .reconnecting
+    }
+}
+
 /// Something the transport learned on its own, without the UI asking.
 enum IntercomTransportEvent: Sendable {
     case connectionStateChanged(ConnectionState)

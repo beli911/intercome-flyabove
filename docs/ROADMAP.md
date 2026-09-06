@@ -9,7 +9,7 @@
 - transport absztrakció
 - alap unit tesztek
 
-## M1 – Valós WebRTC hang (kliensoldal kész, szerver nélkül nem igazolható)
+## M1 – Működő kliensoldali prototípus, elfogadás alatt
 
 Médiaszerver: **LiveKit**, `client-sdk-swift` 2.16. Egy csatorna = egy LiveKit szoba.
 
@@ -65,7 +65,40 @@ Javítva ebben a körben:
   volna ugyanarra a csatornára.
 - **Az integrációs `waitForConnected` timeoutnál buktat**, nem mellékhatásként.
 
-Nyitva mindkét review-ból: reconnect során explicit realtime-token megújítás,
+### Harmadik ellenőrzés ([VERIFICATION_M1_4E42E2D_2026-09-06.md](VERIFICATION_M1_4E42E2D_2026-09-06.md))
+
+A korábban közölt 630/630 stresszeredmény egy valós mérés volt, de nem
+reprodukálható: független ismétlésben 629/630. A hibás teszt nem a PTT, hanem az
+interruption teszt volt, amely az optimista UI-jelzőre várt a tényleges
+transport-hívás helyett. A teszt javítva; a mostani mérés `-test-iterations 30`
+mellett **750/750**.
+
+Javítva ebben a körben, mindegyik regressziós teszttel — és mindegyiket
+ellenőriztem úgy is, hogy a javítás visszavételekor elbukik:
+
+- **Felengedés az engedélykérés alatt.** A worker a jogosultság megszerzése után
+  újraolvassa a kívánt állapotot, így egy közben elengedett gomb nem nyitja meg
+  a mikrofont.
+- **Single-flight mikrofonengedély.** A Talk All csatornánként indított workerei
+  egyetlen engedélykérésen és egyetlen session-váltáson osztoznak.
+- **Egy leszakadt szoba nem bújhat el.** Zöld csak akkor, ha minden belépett
+  vonal fent van; minden más újracsatlakozásként látszik.
+- **Reconnecting alatt nincs implicit új kapcsolat.** A gomb bontást kínál, a
+  `connect()` pedig visszalép.
+- **Join életciklus.** Session-generáció, saját bejegyzést törlő cleanup, a
+  megszakított join bevárása, és a `room.connect` után ellenőrzés — egy későn
+  megérkező szoba nem telepíti be magát bontás után.
+- **Módváltás nyitott latch mellett** minden Talkot elenged, és a háttérbe
+  kerülés is.
+- **Fail-safe:** ha a mikrofon nem áll le határidőre, a kapcsolat bontásra kerül.
+  Drasztikus, de egy beragadt mikrofon élő produkción rosszabb.
+
+CI: [.github/workflows/ci.yml](../.github/workflows/ci.yml) — build és teljes
+teszt futó LiveKit + dev API mellett, plusz külön 30-szoros PTT stresszjob. A
+job elbukik, ha az integrációs teszt kihagyásra kerül, mert az azt jelentené,
+hogy a stack nem is futott.
+
+Nyitva mindhárom review-ból: reconnect során explicit realtime-token megújítás,
 a felhasználói profil visszatöltése érvényes access token mellett, a bázis-URL
 normalizálása és HTTPS-kényszer éles buildben, valamint a LiveKit-token
 szerveroldali publish-tiltásának end-to-end bizonyítása egy „rosszhiszemű"

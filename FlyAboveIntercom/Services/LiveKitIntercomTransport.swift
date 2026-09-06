@@ -35,12 +35,16 @@ actor LiveKitIntercomTransport: IntercomTransport {
     private var wantsTalking: Set<UUID> = []
     /// Per-room connection state. One channel reconnecting must not be masked
     /// by another reporting `.connected`.
-    private var roomStates: [UUID: LiveKit.ConnectionState] = [:]
+    private var roomStates: [UUID: RoomLinkState] = [:]
     /// In-flight joins. Actor isolation does not help here: `room.connect` is an
     /// await, and a Listen and a Talk arriving together would otherwise both
     /// find `sessions[channelID] == nil` and open two rooms, of which only the
     /// last would stay under lifecycle management.
-    private var joinTasks: [UUID: Task<Void, any Error>] = [:]
+    private var joinTasks: [UUID: (token: Int, task: Task<Void, any Error>)] = [:]
+    private var nextJoinToken = 0
+    /// Bumped by every connect and teardown. A `room.connect` that returns after
+    /// the session it belonged to is gone must not install itself.
+    private var sessionGeneration = 0
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
 
@@ -63,6 +67,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
             throw IntercomTransportError.missingProduction
         }
 
+        sessionGeneration += 1
         emit(.connectionStateChanged(.connecting))
 
         do {
@@ -159,20 +164,26 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
     private func join(channelID: UUID) async throws {
         if let inFlight = joinTasks[channelID] {
-            return try await inFlight.value
+            return try await inFlight.task.value
         }
         guard sessions[channelID] == nil else { return }
 
+        nextJoinToken += 1
+        let token = nextJoinToken
+        let generation = sessionGeneration
         let task = Task { [weak self] in
             guard let self else { return }
-            try await self.performJoin(channelID: channelID)
+            try await self.performJoin(channelID: channelID, generation: generation)
         }
-        joinTasks[channelID] = task
-        defer { joinTasks[channelID] = nil }
+        joinTasks[channelID] = (token, task)
+        // Only clear our own entry: a `leave` and a fresh `join` can have
+        // replaced it while this call was suspended, and blindly nilling the map
+        // would let a third caller start a second parallel join.
+        defer { if joinTasks[channelID]?.token == token { joinTasks[channelID] = nil } }
         try await task.value
     }
 
-    private func performJoin(channelID: UUID) async throws {
+    private func performJoin(channelID: UUID, generation: Int) async throws {
         guard sessions[channelID] == nil else { return }
         guard let serverURL else { throw IntercomTransportError.notConnected }
         guard let grant = grants[channelID] else { throw IntercomTransportError.unknownChannel }
@@ -205,14 +216,26 @@ actor LiveKitIntercomTransport: IntercomTransport {
             throw IntercomTransportError.realtime(message: error.readableMessage)
         }
 
+        // The connect above can take seconds. If the session was torn down or
+        // this channel was left in the meantime, this room belongs to nobody:
+        // hand it back rather than installing an orphan that nothing will close.
+        guard generation == sessionGeneration, !Task.isCancelled, sessions[channelID] == nil else {
+            await room.disconnect()
+            return
+        }
+
         sessions[channelID] = ChannelSession(room: room, observer: observer, grant: grant)
-        roomStates[channelID] = room.connectionState
+        roomStates[channelID] = RoomLinkState(room.connectionState)
         emit(.participantCountChanged(channelID: channelID, count: room.remoteParticipants.count + 1))
     }
 
     private func leave(channelID: UUID) async {
-        joinTasks[channelID]?.cancel()
-        joinTasks[channelID] = nil
+        if let inFlight = joinTasks.removeValue(forKey: channelID) {
+            inFlight.task.cancel()
+            // Wait it out: a join that lands after we have cleaned up would
+            // otherwise resurrect the room.
+            _ = try? await inFlight.task.value
+        }
         roomStates.removeValue(forKey: channelID)
         guard let session = sessions.removeValue(forKey: channelID) else { return }
         await session.room.disconnect()
@@ -227,8 +250,13 @@ actor LiveKitIntercomTransport: IntercomTransport {
             await session.room.disconnect()
             emit(.talkStopped(channelID: channelID))
         }
-        for task in joinTasks.values { task.cancel() }
+        sessionGeneration += 1
+        let pending = joinTasks.values
         joinTasks.removeAll()
+        for entry in pending {
+            entry.task.cancel()
+            _ = try? await entry.task.value
+        }
         sessions.removeAll()
         roomStates.removeAll()
         grants.removeAll()
@@ -241,8 +269,9 @@ actor LiveKitIntercomTransport: IntercomTransport {
         switch signal {
         case let .connectionState(state):
             guard sessions[channelID] != nil else { return }
-            roomStates[channelID] = state
-            if state == .reconnecting || state == .disconnected {
+            let link = RoomLinkState(state)
+            roomStates[channelID] = link
+            if link == .reconnecting || link == .disconnected {
                 // The publisher transport is gone; the Talk button must not
                 // keep claiming we are on air.
                 wantsTalking.remove(channelID)
@@ -258,17 +287,8 @@ actor LiveKitIntercomTransport: IntercomTransport {
         }
     }
 
-    /// The app is only as connected as its worst room: a single channel
-    /// reconnecting is something the operator needs to see, even if the others
-    /// are fine.
     private func aggregatedConnectionState() -> ConnectionState {
-        let states = roomStates.values
-        guard !states.isEmpty else { return .disconnected }
-        if states.contains(where: { $0 == .reconnecting || $0 == .connecting }) {
-            return .reconnecting
-        }
-        if states.contains(where: { $0 == .connected }) { return .connected }
-        return .disconnected
+        ConnectionAggregation.state(from: Array(roomStates.values))
     }
 
     private func removeContinuation(_ id: UUID) {
@@ -361,5 +381,18 @@ private final class RoomObserver: NSObject, RoomDelegate, @unchecked Sendable {
 
     func room(_: Room, participant _: LocalParticipant, didUnpublishTrack _: LocalTrackPublication) {
         handler(channelID, .localAudioUnpublished)
+    }
+}
+
+
+private extension RoomLinkState {
+    init(_ state: LiveKit.ConnectionState) {
+        switch state {
+        case .connected: self = .connected
+        case .connecting: self = .connecting
+        case .reconnecting: self = .reconnecting
+        case .disconnected, .disconnecting: self = .disconnected
+        @unknown default: self = .disconnected
+        }
     }
 }

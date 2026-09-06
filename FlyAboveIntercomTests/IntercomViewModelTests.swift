@@ -218,6 +218,81 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertEqual(calls.filter(\.enabled).count, 1)
     }
 
+    func testReleaseDuringThePermissionPromptNeverOpensTheMicrophone() async {
+        let transport = TransportSpy()
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(transport: transport, audioSession: audio)
+        await subject.connect()
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+
+        // Hold the system permission prompt open, press, then let go while it is
+        // still up. Granting afterwards must not open a microphone the user is
+        // no longer asking for.
+        await audio.blockNextPermissionRequest()
+        subject.requestTalking(true, channelID: channelID)
+        let prompting = await audio.waitUntilPrompting()
+        XCTAssertTrue(prompting, "Az engedélykérés nem indult el.")
+
+        subject.requestTalking(false, channelID: channelID)
+        await audio.unblockPermissionRequest()
+        await subject.waitForTalkWorkToSettle()
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        let calls = await transport.talkCallsValue()
+        XCTAssertTrue(
+            calls.filter(\.enabled).isEmpty,
+            "A mikrofon elindult, pedig a gombot már elengedték: \(calls)"
+        )
+    }
+
+    func testTalkAllAsksForTheMicrophoneOnlyOnce() async {
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(transport: TransportSpy(), audioSession: audio)
+        await subject.connect()
+
+        subject.requestTalkingOnAllChannels(true)
+        await subject.waitForTalkWorkToSettle()
+
+        // Three channels, one prompt and one session activation.
+        let asked = await audio.permissionRequestCount()
+        XCTAssertEqual(asked, 1)
+        let recordingModes = await audio.activateRecordingModes()
+        XCTAssertEqual(recordingModes, [false, true])
+    }
+
+    func testSwitchingTalkModeReleasesAnOpenLatch() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        subject.talkMode = .latch
+        let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        subject.requestTalking(true, channelID: channelID)
+        await subject.waitForTalkWorkToSettle()
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
+
+        subject.talkMode = .momentary
+        await subject.waitForTalkWorkToSettle()
+
+        // Momentary has no button holding it open, so the latch must not survive
+        // the switch.
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        let calls = await transport.talkCallsValue()
+        XCTAssertEqual(calls.last?.enabled, false)
+    }
+
+    func testConnectIsIgnoredWhileReconnecting() async {
+        let (subject, transport, _) = await makeConnectedSubject()
+        await transport.emit(.connectionStateChanged(.reconnecting))
+        await waitUntil { subject.connectionState == .reconnecting }
+        let connectsBefore = await transport.connectCount()
+
+        await subject.connect()
+
+        // A second connect on a live transport would mint new grants alongside
+        // the existing sessions.
+        let connectsAfter = await transport.connectCount()
+        XCTAssertEqual(connectsAfter, connectsBefore)
+        XCTAssertEqual(subject.connectionState, .reconnecting)
+    }
+
     // MARK: - Audio session events
 
     func testInterruptionStopsTalkingEverywhere() async {
@@ -229,9 +304,11 @@ final class IntercomViewModelTests: XCTestCase {
         // as on air while nothing is transmitted.
         await audio.emit(.interruptionBegan)
 
-        await waitUntil { subject.activeTalkChannelCount == 0 }
-        let talkCalls = await transport.talkCallsValue()
-        XCTAssertEqual(talkCalls.last?.enabled, false)
+        // Wait on the transport, not on the optimistic UI flag: the view model
+        // clears `isTalking` before the call goes out, so asserting on the flag
+        // races the worker that actually closes the microphone.
+        await waitUntilAsync { await transport.talkCallsValue().last?.enabled == false }
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
     }
 
     func testHeadsetDisconnectStopsTalking() async {
@@ -333,6 +410,21 @@ final class IntercomViewModelTests: XCTestCase {
         return (subject, transport, audio)
     }
 
+    /// Same as `waitUntil`, for a condition that has to be read off an actor.
+    private func waitUntilAsync(
+        timeout: TimeInterval = 2,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        _ condition: () async -> Bool
+    ) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if await condition() { return }
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        XCTFail("Időtúllépés: a várt állapot nem állt be.", file: file, line: line)
+    }
+
     /// The view model consumes events on a detached task, so assertions have to
     /// wait for the state to settle rather than assume it already has.
     private func waitUntil(
@@ -370,7 +462,14 @@ private actor TransportSpy: IntercomTransport {
         (stream, continuation) = AsyncStream.makeStream()
     }
 
-    func connect(configuration _: IntercomConfiguration) async throws { didConnect = true }
+    private(set) var connects = 0
+
+    func connect(configuration _: IntercomConfiguration) async throws {
+        didConnect = true
+        connects += 1
+    }
+
+    func connectCount() -> Int { connects }
     func disconnect() async {}
     func setListening(_: Bool, channelID _: UUID) async throws {}
 
@@ -423,8 +522,36 @@ private actor AudioSessionSpy: AudioSessionControlling {
         (stream, continuation) = AsyncStream.makeStream()
     }
 
+    private var permissionGate: CheckedContinuation<Void, Never>?
+    private var blockPermission = false
+    private var isPrompting = false
+
+    /// Holds the next permission request open, so a test can release the button
+    /// while the system prompt is still on screen.
+    func blockNextPermissionRequest() { blockPermission = true }
+
+    func waitUntilPrompting(timeout: TimeInterval = 2) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !isPrompting, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(2))
+        }
+        return isPrompting
+    }
+
+    func unblockPermissionRequest() {
+        blockPermission = false
+        isPrompting = false
+        permissionGate?.resume()
+        permissionGate = nil
+    }
+
     func requestMicrophonePermission() async -> Bool {
         permissionRequests += 1
+        if blockPermission {
+            blockPermission = false
+            isPrompting = true
+            await withCheckedContinuation { continuation in permissionGate = continuation }
+        }
         return permissionGranted
     }
 
