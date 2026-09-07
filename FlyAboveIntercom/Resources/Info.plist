@@ -2,15 +2,72 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>hu</string>
 	<key>CFBundleDisplayName</key>
-	<string>FlyAbove Intercom</string>
+	<string>Flycom</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!-- Comes from the FLYABOVE_API_BASE_URL build setting. Empty means
+	     offline demo mode: no login, no network audio. -->
+	<key>FlyAboveAPIBaseURL</key>
+	<string>$(FLYABOVE_API_BASE_URL)</string>
+	<!-- Lets the app reach a dev server on the LAN over plain HTTP. Production
+	     traffic is HTTPS/WSS, which needs no exception. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>A produkciós meghívó QR-kódjának beolvasásához.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>hu.flyabove.intercom.invite</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>flyabove-intercom</string>
+			</array>
+		</dict>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>A helyi hálózaton futó fejlesztői intercom szerver eléréséhez.</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>A FlyAbove Intercom a produkciós kommunikációhoz használja a mikrofont.</string>
+	<string>A Flycom a produkciós kommunikációhoz használja a mikrofont.</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+	</dict>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>arm64</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
 </dict>
 </plist>

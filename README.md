@@ -1,29 +1,50 @@
-# FlyAbove Intercom
+# Flycom
 
-Natív iOS produkciós intercom alkalmazás. A cél egy alacsony késleltetésű,
+A FlyAbove produkciós intercom alkalmazása iOS-re. A cél egy alacsony késleltetésű,
 többcsatornás, interneten és helyi hálózaton is használható kommunikációs rendszer.
 
-## Jelenlegi állapot – 0.1 alap
+## Jelenlegi állapot – 0.2
+
+Kliensoldalon:
 
 - natív SwiftUI alkalmazás iOS 17+-hoz;
-- csatornalista és résztvevőszám;
-- csatornánkénti Listen kapcsoló;
-- nyomva tartandó Talk/PTT gomb;
+- csatornalista, résztvevőszám, beszélőjelzés;
+- csatornánkénti Listen kapcsoló és momentary Talk/PTT;
 - mikrofonengedély és `AVAudioSession` voice-chat konfiguráció;
-- kapcsolat- és hibastátusz;
-- cserélhető `IntercomTransport` réteg;
-- unit tesztek a kapcsolat és a PTT alapállapotaihoz.
+- audio interruption, route change és media-services-reset kezelés;
+- bejelentkezés, Keychain tokenkezelés, automatikus token-frissítés;
+- LiveKit-alapú `IntercomTransport` implementáció (csatorna = LiveKit szoba);
+- RTT/bitráta overlay fejlesztői módban;
+- a mobil UX javaslat vizuális rendszere: bejelentkezés, produkcióválasztó,
+  intercom főképernyő, crew lista, csatorna beállítás, profil — sötét és
+  napfény témával;
+- produkcióválasztó, résztvevőlista jelenléttel, csatornánkénti hangerő;
+- meghívó QR/kód és deep link; admin által küldött konfigurációváltás;
+- program feed, IFB ducking és prioritás vonal;
+- privát hívás efemer csatornaként;
+- monitor fül: RTT, csomagvesztés, jitter és munkamenet-eseménynapló;
+- 136 teszt: unit (auth, tokentárolás, view model eseménykezelés) és
+  integrációs, utóbbi valódi LiveKit szerverrel.
 
-A jelenlegi `PreviewIntercomTransport` helyi demó: a felület és az audio-session
-működik, de még nem továbbít hangot hálózaton. A következő mérföldkő a WebRTC
-transport és a signaling/backend szerződés.
+**Szerver nélkül nem szól.** Amíg az `Info.plist` `FlyAboveAPIBaseURL` kulcsa
+üres, az app **demó módban** indul: bejelentkezés nélkül, helyi transporttal,
+a felületen jelzett módon.
+
+A backend a [server/](server/) könyvtárban van: futtatható
+referencia-backend (LiveKit + token/API szerver), amivel a teljes lánc
+végigjátszható. Éles használatra nem alkalmas.
 
 ## Indítás
 
 1. Nyisd meg a `FlyAboveIntercom.xcodeproj` projektet Xcode 26-tal.
 2. Válassz iOS 17 vagy újabb szimulátort/eszközt.
-3. Futtasd a `FlyAboveIntercom` scheme-et.
+3. Futtasd a `FlyAboveIntercom` scheme-et. Első build előtt Xcode feloldja a
+   LiveKit SPM-függőséget, ez néhány percet vehet igénybe.
 4. Valódi mikrofon és Bluetooth teszthez használj fizikai iPhone-t.
+
+Szerver bekötése: írd be a bázis-URL-t az `Info.plist` `FlyAboveAPIBaseURL`
+kulcsába (például `https://api.intercom.flyabove.hu/`), és az app a
+bejelentkezési képernyővel indul.
 
 Parancssoros ellenőrzés:
 
@@ -35,9 +56,29 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
   test
 ```
 
+## Név és jelölés
+
+A termék neve **Flycom**; a cég FlyAbove. A jel a „szintmérő" logóirány: négy
+sáv, ami maga a hang, nem a mikrofon képe. Csak téglalapokból áll, ezért 18
+ponton és hímzésben is megmarad.
+
+Az app ikonja fordított — sárga sávok fekete alapon —, mert a telefon a
+legtöbbször sötét kezdőlapon és sötét pultban van. Ugyanaz a rajz adja az
+ikont és a felületen látható jelet: a
+[`scripts/make-app-icon.swift`](scripts/make-app-icon.swift) és a
+[`FlycomMark`](FlyAboveIntercom/UI/FlycomMark.swift) ugyanazokat az arányokat
+használja.
+
+Az Xcode target, a bundle azonosító (`hu.flyabove.intercom`) és a repository
+neve szándékosan maradt a régi: átnevezésük provisioning profilokat, telepített
+appokat és külső hivatkozásokat törne el, és az külön döntés.
+
 ## Dokumentáció
 
 - [Architektúra](docs/ARCHITECTURE.md)
+- [API-szerződés](docs/API.md)
+- [Vizuális rendszer](docs/DESIGN.md)
+- [Backend](server/README.md)
 - [Fejlesztési terv](docs/ROADMAP.md)
 - [Fejlesztői útmutató](docs/DEVELOPMENT.md)
 - [Biztonság és adatvédelem](docs/SECURITY.md)
@@ -47,8 +88,9 @@ xcodebuild -project FlyAboveIntercom.xcodeproj \
 - Swift 6
 - SwiftUI + Combine (`ObservableObject`)
 - AVFAudio / AVAudioSession
-- strukturált Swift concurrency
-- tervezett: WebRTC, WebSocket/HTTPS signaling, STUN/TURN
+- strukturált Swift concurrency (actorok, `AsyncStream`)
+- LiveKit `client-sdk-swift` 2.16 (WebRTC, DTLS-SRTP, ICE/TURN)
+- Security.framework / Keychain
 
 ## Licenc
 
