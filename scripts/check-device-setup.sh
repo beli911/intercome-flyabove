@@ -78,7 +78,7 @@ else
   lk=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "http://$ip:7880" || true)
   # 401 is the healthy answer from the API: it exists and demands a token.
   [ "$api" = "401" ] && pass "dev API — http://$ip:8080" \
-    || miss "dev API nem válaszol ($ip:8080)" "cd dev-server && npm start"
+    || miss "dev API nem válaszol ($ip:8080)" "cd server && SEED_DEMO=1 DATABASE_PATH=:memory: npm start"
   [ "$lk" = "200" ] && pass "LiveKit — http://$ip:7880" \
     || miss "LiveKit nem válaszol ($ip:7880)" "livekit-server --dev --bind 0.0.0.0"
 

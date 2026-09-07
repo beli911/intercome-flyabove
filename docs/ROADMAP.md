@@ -27,7 +27,7 @@ Igazolva valódi LiveKit szerverrel (`LiveKitTransportIntegrationTests`):
 csatlakozás és szobába lépés, mikrofon publikálása Talkra, publish jog nélküli
 csatorna elutasítása, és két kliens egymás látása a közös csatornán.
 
-Fejlesztői backend: [dev-server/](../dev-server/) — nem éles.
+Backend: [server/](../server/).
 
 ### Első ellenőrzés ([REVIEW_M1_2026-09-06.md](REVIEW_M1_2026-09-06.md))
 
@@ -151,7 +151,7 @@ Javítva még:
   fogad el. Élő teszt fedi.
 - **Helyreállítás leszakadt vonalra.** Ha a LiveKit feladja, a transport friss
   grantet kér és újra belép, növekvő várakozással, öt próbálkozásig. A teszt a
-  dev-serverrel kilépteti a résztvevőt — ez az egyetlen mód olyan bontást
+  a szerver debug végpontjával lépteti ki a résztvevőt — ez az egyetlen mód olyan bontást
   előidézni, amit nem a kliens kért.
 - **Bázis-URL normalizálás és HTTPS-kényszer.** A záró perjel hiánya csendben
   elnyelte volna az útvonal utolsó elemét; a Release build pedig nem indul el
@@ -161,7 +161,7 @@ Javítva még:
   — refresh kör nélkül. A régi formátumú tárolt elem továbbra is betöltődik.
 - **A publish-tiltás bizonyítása rosszhiszemű klienssel.** Egy nyers LiveKit
   `Room` csatlakozik a szerver saját tokenjével, és megpróbál publikálni. A
-  szervernek kell elutasítania — ellenőrizve azzal is, hogy a dev-server
+  szervernek kell elutasítania — ellenőrizve azzal is, hogy a szerver
   ideiglenesen megadott jogánál a teszt elbukik.
 
 Nyitva:

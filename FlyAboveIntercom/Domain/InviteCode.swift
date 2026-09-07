@@ -7,7 +7,7 @@ import Foundation
 /// or L against 1. Input is normalised rather than rejected — someone typing
 /// "dm2p" or "DM 2P" meant the right thing.
 enum InviteCode {
-    static let length = 4
+    static let length = 6
     static let alphabet = Set("ABCDEFGHJKMNPQRSTUVWXYZ23456789")
 
     static func normalised(_ raw: String) -> String {

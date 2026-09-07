@@ -1,0 +1,23 @@
+{
+  "name": "flycom-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Flycom API and LiveKit token server.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "SEED_DEMO=1 DATABASE_PATH=:memory: node src/index.js",
+    "test": "DATABASE_PATH=:memory: node --test test/api.test.js",
+    "secret": "node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\"",
+    "hash": "node scripts/hash-password.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "livekit-server-sdk": "^2.9.7"
+  }
+}

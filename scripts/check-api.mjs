@@ -233,8 +233,8 @@ if (!skipWrites) {
   } else {
     check('POST .../invites → 201', invite.status === 201, `kapott: ${invite.status}`);
     const code = invite.json?.code;
-    check('kód 4 karakter, félreérthető betűk nélkül',
-      typeof code === 'string' && /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{4}$/.test(code),
+    check('kód 6 karakter, félreérthető betűk nélkül',
+      typeof code === 'string' && /^[ABCDEFGHJKMNPQRSTUVWXYZ23456789]{6}$/.test(code),
       `kapott: ${code}`);
     if (code) {
       const preview = await call(`v1/invites/${code}`, { token });

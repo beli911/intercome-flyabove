@@ -81,7 +81,7 @@ echo
 if ! curl -s -o /dev/null --max-time 3 "http://$IP:8080/v1/productions"; then
   echo "Figyelem: a dev API nem válaszol a $IP:8080 címen." >&2
   echo "Indítsd el: livekit-server --dev --bind 0.0.0.0" >&2
-  echo "         és: cd dev-server && LIVEKIT_URL=ws://$IP:7880 npm start" >&2
+  echo "         és: cd server && SEED_DEMO=1 DATABASE_PATH=:memory: LIVEKIT_URL=ws://$IP:7880 npm start" >&2
 fi
 
 DERIVED=$(mktemp -d)

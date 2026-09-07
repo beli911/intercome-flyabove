@@ -30,7 +30,7 @@ Kliensoldalon:
 üres, az app **demó módban** indul: bejelentkezés nélkül, helyi transporttal,
 a felületen jelzett módon.
 
-Fejlesztéshez a [dev-server/](dev-server/) könyvtárban van egy futtatható
+A backend a [server/](server/) könyvtárban van: futtatható
 referencia-backend (LiveKit + token/API szerver), amivel a teljes lánc
 végigjátszható. Éles használatra nem alkalmas.
 
@@ -78,7 +78,7 @@ appokat és külső hivatkozásokat törne el, és az külön döntés.
 - [Architektúra](docs/ARCHITECTURE.md)
 - [API-szerződés](docs/API.md)
 - [Vizuális rendszer](docs/DESIGN.md)
-- [Fejlesztői szerver](dev-server/README.md)
+- [Backend](server/README.md)
 - [Fejlesztési terv](docs/ROADMAP.md)
 - [Fejlesztői útmutató](docs/DEVELOPMENT.md)
 - [Biztonság és adatvédelem](docs/SECURITY.md)

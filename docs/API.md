@@ -107,6 +107,15 @@ A `canTalk` / `canListen` a felület számára van: a tényleges kikényszerít�
 realtime tokenben történik. A `participantCount` induló érték, utána a realtime
 kapcsolat frissíti.
 
+### `GET /v1/productions/{productionId}/crew`
+
+```json
+[{ "id": "…", "displayName": "Benner Belián", "role": "admin" }]
+```
+
+A névsor, nem a jelenlét: hogy ki van ténylegesen bejelentkezve, arra csak a
+realtime réteg tud válaszolni.
+
 ## Realtime (LiveKit)
 
 **Egy csatorna = egy LiveKit szoba.** Ez teszi party-line-ná az intercomot: ha a
@@ -155,6 +164,21 @@ külön TURN-relayt használ, azt a `LiveKitIntercomTransport`
 `extraIceServers` paraméterén kell átadni. Zárt vendéghálózatokon TURN/TLS 443
 kell, különben a média nem jut ki.
 
+## Korlátozás
+
+A `POST /v1/auth/login` **csak a sikertelen** próbálkozásokat számolja, cím és
+fiók párra. Egy helyes jelszó soha nem kap `429`-et, és törli az addig
+összegyűlt sikertelen próbálkozásokat.
+
+Ez szándékos: egy olyan limit, ami a helyes jelszót is elutasítja, fióklezárás
+— és aki adás közben ki tud zárni egy rendezőt a vonalról, az valódi kárt
+okozott anélkül, hogy bármit kitalált volna. A találgatás ettől még korlátos:
+végpontonként egy durvább, címre szóló plafon fékezi, és a jelszó-hash
+önmagában is tizedmásodperces műveletenként.
+
+A `429` válasz a szokásos hibaformátumot adja, `Retry-After` fejléccel és egy
+`retryAfter` mezővel (másodperc).
+
 ## Hibaformátum
 
 Minden nem 2xx válasz törzse:
@@ -192,14 +216,18 @@ kódokat talkbacken mondják be és sötétben gépelik. **A kliens és a szerve
 ábécéjének karakterre egyeznie kell** — amit a szerver kiad, de a kliens
 kiszűr, az begépelhetetlen kód.
 
+A kód **6 karakter**. Négy karakter 923 ezer lehetőség, ami egy kitalálható
+belépő egy élő produkció vonalaira; hat karakterrel ez 887 millió, és a
+begépelése ugyanannyival tovább tart, mint amennyit egy szó kimondása.
+
 ### `POST /v1/productions/{productionId}/invites`
 
 Csak `supervisor` vagy `admin` szerep. Válasz `201`:
 
 ```json
 {
-  "code": "MP9H",
-  "url": "flyabove-intercom://invite/MP9H",
+  "code": "MP9HK4",
+  "url": "flyabove-intercom://invite/MP9HK4",
   "productionId": "…",
   "productionName": "Reggeli stúdió — 4. blokk",
   "expiresAt": "2026-09-07T01:04:23.489Z"
@@ -283,14 +311,14 @@ Megkülönbözteti a **hibát** (`✗`, a szerződéstől való eltérés) és a
 URL `ws://` és nem `wss://`, vagy hogy a grantek élettartama szűkebb, mint amire
 a kliens megújítási logikája számít.
 
-Az ellenőrzőt a `dev-server` ellen validáltam: az 25 ellenőrzésen megy át, és
+Az ellenőrzőt a `server/` ellen validáltam: a 29 ellenőrzésen megy át, és
 szándékosan bevitt eltéréseket (`expiresIn` sztringként, hiányzó `role`, lapos
 hibaformátum) mind megfogja.
 
 ## Fejlesztői referencia-implementáció
 
-A `dev-server/` könyvtárban van egy Node-alapú, memóriában dolgozó
-implementáció, kizárólag fejlesztéshez. Lásd [dev-server/README.md](../dev-server/README.md).
+A `server/` könyvtárban van a szerződés teljes implementációja: Node, SQLite,
+LiveKit Cloud. Lásd [server/README.md](../server/README.md).
 
 ## Ami még nincs a szerződésben
 

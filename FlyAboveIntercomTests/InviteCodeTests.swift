@@ -5,12 +5,12 @@ final class InviteCodeTests: XCTestCase {
     func testLowercaseIsAccepted() {
         // Someone typing what they were told, in the case their keyboard gave
         // them, meant the right thing.
-        XCTAssertEqual(InviteCode.normalised("dm2p"), "DM2P")
+        XCTAssertEqual(InviteCode.normalised("dm2ph4"), "DM2PH4")
     }
 
     func testSeparatorsAndSpacesAreStripped() {
-        XCTAssertEqual(InviteCode.normalised("DM 2P"), "DM2P")
-        XCTAssertEqual(InviteCode.normalised("DM-2P"), "DM2P")
+        XCTAssertEqual(InviteCode.normalised("DM2 PH4"), "DM2PH4")
+        XCTAssertEqual(InviteCode.normalised("DM2-PH4"), "DM2PH4")
     }
 
     func testAmbiguousCharactersAreNotInTheAlphabet() {
@@ -22,33 +22,33 @@ final class InviteCodeTests: XCTestCase {
     }
 
     func testOverlongInputIsTruncated() {
-        XCTAssertEqual(InviteCode.normalised("DM2PXYZ"), "DM2P")
+        XCTAssertEqual(InviteCode.normalised("DM2PH4XYZ"), "DM2PH4")
     }
 
     func testCompleteness() {
-        XCTAssertFalse(InviteCode.isComplete("DM2"))
-        XCTAssertTrue(InviteCode.isComplete("DM2P"))
+        XCTAssertFalse(InviteCode.isComplete("DM2PH"))
+        XCTAssertTrue(InviteCode.isComplete("DM2PH4"))
         XCTAssertFalse(InviteCode.isComplete(""))
     }
 
     func testCustomSchemeLink() {
         XCTAssertEqual(
-            InviteCode.from(url: URL(string: "flyabove-intercom://invite/DM2P")!),
-            "DM2P"
+            InviteCode.from(url: URL(string: "flyabove-intercom://invite/DM2PH4")!),
+            "DM2PH4"
         )
     }
 
     func testCustomSchemeLinkWithoutDoubleSlash() {
         XCTAssertEqual(
-            InviteCode.from(url: URL(string: "flyabove-intercom:invite/DM2P")!),
-            "DM2P"
+            InviteCode.from(url: URL(string: "flyabove-intercom:invite/DM2PH4")!),
+            "DM2PH4"
         )
     }
 
     func testHTTPSLink() {
         XCTAssertEqual(
-            InviteCode.from(url: URL(string: "https://intercom.flyabove.hu/invite/DM2P")!),
-            "DM2P"
+            InviteCode.from(url: URL(string: "https://intercom.flyabove.hu/invite/DM2PH4")!),
+            "DM2PH4"
         )
     }
 

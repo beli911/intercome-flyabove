@@ -22,8 +22,9 @@ A LiveKit bináris frameworkjei dinamikusak, ezért a projekt
 `@executable_path/Frameworks` útvonalat. Enélkül a build sikeres, de az app
 indításkor dyld-hibával kilép — új target hozzáadásakor erre figyelj.
 
-A `LiveKitTransportIntegrationTests` valódi LiveKit szervert igényel; enélkül
-magát kihagyja. Lásd [dev-server/README.md](../dev-server/README.md).
+A `LiveKitTransportIntegrationTests` valódi LiveKit szervert és futó API-t
+igényel a `127.0.0.1:8080` címen; enélkül magát kihagyja. Lásd
+[server/README.md](../server/README.md).
 
 ## Futtatás fizikai iPhone-on
 
@@ -58,7 +59,8 @@ livekit-server --dev --bind 0.0.0.0
 ```
 
 ```sh
-cd dev-server && LIVEKIT_URL=ws://$(ipconfig getifaddr en0):7880 npm start
+cd server && SEED_DEMO=1 DATABASE_PATH=:memory: \
+  LIVEKIT_URL=ws://$(ipconfig getifaddr en0):7880 npm start
 ```
 
 A telefon és a gép ugyanazon a Wi-Fi-n legyen. A LiveKit `nodeIP` értéke a gép
