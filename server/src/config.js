@@ -54,17 +54,38 @@ if (isProduction && livekitUrl && !livekitUrl.startsWith('wss://')) {
   problems.push('LIVEKIT_URL nem wss:// — éles környezetben a médiajelzésnek titkosítottnak kell lennie');
 }
 
+/// Numbers from the environment, checked rather than coerced.
+///
+/// `Number('abc')` is `NaN`, `Number('')` is `0`, and both flow onwards as a
+/// token lifetime or a rate limit without complaint. A server that starts with
+/// `ACCESS_TOKEN_TTL=-1` issues tokens that are already expired, and nothing
+/// about that looks like a configuration error from the outside.
+function integerInRange(name, fallback, { min, max }) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < min || value > max) {
+    problems.push(`${name} egész szám legyen ${min} és ${max} között (kapott: ${raw})`);
+    return fallback;
+  }
+  return value;
+}
+
 export const config = Object.freeze({
   isProduction,
-  port: Number(process.env.PORT ?? 8080),
+  port: integerInRange('PORT', 8080, { min: 1, max: 65535 }),
+  /// Loopback in production by default: a Node process on 0.0.0.0 behind a
+  /// TLS proxy is also a Node process reachable without it.
+  host: process.env.HOST ?? (isProduction ? '127.0.0.1' : '0.0.0.0'),
   /// `:memory:` is for tests; anything else is a file that must survive a restart.
   databasePath: process.env.DATABASE_PATH ?? './flycom.db',
   jwtSecret,
-  accessTokenTtlSeconds: Number(process.env.ACCESS_TOKEN_TTL ?? 900),
-  refreshTokenTtlSeconds: Number(process.env.REFRESH_TOKEN_TTL ?? 60 * 60 * 24 * 30),
+  accessTokenTtlSeconds: integerInRange('ACCESS_TOKEN_TTL', 900, { min: 60, max: 3600 }),
+  refreshTokenTtlSeconds: integerInRange('REFRESH_TOKEN_TTL', 60 * 60 * 24 * 30,
+    { min: 3600, max: 60 * 60 * 24 * 365 }),
   /// One hour. The client renews ten minutes before expiry, so anything under
   /// fifteen minutes leaves no room for a renewal to fail and be retried.
-  roomTokenTtlSeconds: Number(process.env.ROOM_TOKEN_TTL ?? 3600),
+  roomTokenTtlSeconds: integerInRange('ROOM_TOKEN_TTL', 3600, { min: 900, max: 60 * 60 * 12 }),
   livekit: Object.freeze({
     get url() {
       return configuredLivekitUrl ?? `ws://${detectLANAddress()}:7880`;
@@ -77,11 +98,20 @@ export const config = Object.freeze({
   /// Trust the reverse proxy's client address; wrong here means the login rate
   /// limit throttles the proxy instead of the caller.
   trustProxy: process.env.TRUST_PROXY === '1',
-  loginAttemptsPerWindow: Number(process.env.LOGIN_ATTEMPTS ?? 10),
-  loginWindowSeconds: Number(process.env.LOGIN_WINDOW ?? 900),
+  loginAttemptsPerWindow: integerInRange('LOGIN_ATTEMPTS', 10, { min: 1, max: 10_000 }),
+  loginWindowSeconds: integerInRange('LOGIN_WINDOW', 900, { min: 10, max: 60 * 60 * 24 }),
 });
 
 export function assertConfigured() {
+  // Range problems are refused everywhere, not only in production: a token
+  // lifetime of -1 is a mistake on a laptop too, and one that presents as
+  // "the app logs me out instantly" rather than as a configuration error.
+  if (problems.length > 0) {
+    console.error('A szerver nem indul el, mert a konfiguráció hibás:');
+    for (const problem of problems) console.error(`  - ${problem}`);
+    process.exit(1);
+  }
+
   // Unsafe defaults are the ones worth shouting about: they work, which is
   // exactly why nobody notices them.
   if (!isProduction) {

@@ -561,9 +561,21 @@ final class IntercomViewModel: ObservableObject {
     /// when the production says so. Only then do the cosmetic and structural
     /// changes land.
     func applyUpdatedChannels(_ descriptors: [ChannelDescriptor]) async {
-        let incoming = Dictionary(
-            uniqueKeysWithValues: descriptors.map { ($0.id, $0) }
-        )
+        // Not `uniqueKeysWithValues`: a server that names a channel twice would
+        // trap here, taking the app down mid-broadcast instead of producing
+        // something readable. A duplicate is refused rather than resolved,
+        // because which copy wins would depend on response order.
+        var incoming: [UUID: ChannelDescriptor] = [:]
+        for descriptor in descriptors {
+            guard incoming.updateValue(descriptor, forKey: descriptor.id) == nil else {
+                events.record(
+                    .invalidServerResponse,
+                    severity: .error,
+                    detail: "ugyanaz a csatorna kétszer szerepel a listában"
+                )
+                return
+            }
+        }
 
         // 1. Revoked Talk, on every affected channel, first.
         for channel in configuration.channels where channel.isTalking {

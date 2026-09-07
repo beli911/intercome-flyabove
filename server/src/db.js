@@ -19,6 +19,10 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT NOT NULL UNIQUE,
   display_name  TEXT NOT NULL,
   password_hash TEXT NOT NULL,
+  -- Carried in every access token and checked on every request. Logout raises
+  -- it, which is what makes an access token revocable at all: a signed JWT is
+  -- otherwise valid until it expires, however lost the phone is.
+  session_version INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL
 );
 
@@ -96,6 +100,20 @@ CREATE TABLE IF NOT EXISTS meta (
 );
 `);
 
+/// Adds a column an older database predates.
+///
+/// `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so
+/// without this a schema change silently applies only to fresh installs — and
+/// the first symptom is a query failing in production against the one database
+/// that matters.
+function addColumnIfMissing(table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((existing) => existing.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
+addColumnIfMissing('users', 'session_version', 'INTEGER NOT NULL DEFAULT 1');
+
 const now = () => new Date().toISOString();
 export const uuid = () => crypto.randomUUID();
 
@@ -122,6 +140,15 @@ export function findUserByEmail(email) {
 
 export function findUserById(id) {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id);
+}
+
+/// Ends every session: refresh tokens revoked, and every access token already
+/// out there stops verifying.
+export function endAllSessions(userId) {
+  revokeAllForUser(userId);
+  const row = db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ? RETURNING session_version')
+    .get(userId);
+  return row?.session_version;
 }
 
 export function createUser({ email, displayName, passwordHash }) {

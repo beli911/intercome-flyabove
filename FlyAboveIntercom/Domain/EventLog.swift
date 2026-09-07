@@ -34,6 +34,9 @@ final class EventLog: ObservableObject {
         case privateCallStarted
         case privateCallEnded
         case failsafeDisconnect
+        /// The server sent something this client cannot act on. Recorded rather
+        /// than trapped: a malformed response should be diagnosable, not fatal.
+        case invalidServerResponse
 
         var title: String {
             switch self {
@@ -51,6 +54,7 @@ final class EventLog: ObservableObject {
             case .privateCallStarted: "PRIVÁT HÍVÁS INDULT"
             case .privateCallEnded: "PRIVÁT HÍVÁS VÉGE"
             case .failsafeDisconnect: "BIZTONSÁGI BONTÁS"
+            case .invalidServerResponse: "HIBÁS SZERVERVÁLASZ"
             }
         }
     }

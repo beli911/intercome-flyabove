@@ -83,6 +83,49 @@ export async function broadcastConfiguration({ productionId, channelIds, version
   }
 }
 
+/// Applies a permission change inside the running LiveKit room.
+///
+/// The REST change and the configuration push are not a security boundary: an
+/// already-issued room token carries `canPublish` for its whole hour, so a
+/// modified, frozen, or push-missing client keeps talking after the right was
+/// taken away. `updateParticipant` is what actually silences it — LiveKit
+/// unpublishes the live track when publish permission is withdrawn.
+///
+/// Returns whether the room was reached. `false` is not "nothing to do": a
+/// caller that cannot confirm the change has to decide what to do about a
+/// participant who may still be publishing.
+export async function updateParticipantPermission({
+  productionId, channelId, identity, canPublish, canSubscribe,
+}) {
+  const room = roomName(productionId, channelId);
+  try {
+    await roomService().updateParticipant(room, identity, {
+      permission: { canPublish, canSubscribe, canPublishData: false },
+    });
+    return { applied: true };
+  } catch (error) {
+    // A room nobody has joined has no participant to update, and that is the
+    // common case — distinguishing it from a real failure is what lets the
+    // caller fail closed only when it must.
+    const message = String(error?.message ?? error);
+    const absent = /not found|does not exist|no such/i.test(message);
+    return { applied: false, absent, message };
+  }
+}
+
+/// The fail-closed path: if a participant's publish right cannot be reduced,
+/// removing them is the only remaining way to stop the audio. They reconnect
+/// with a fresh token, which no longer grants publish.
+export async function evictParticipant({ productionId, channelId, identity }) {
+  const room = roomName(productionId, channelId);
+  try {
+    await roomService().removeParticipant(room, identity);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function listParticipants(room) {
   try {
     return await roomService().listParticipants(room);

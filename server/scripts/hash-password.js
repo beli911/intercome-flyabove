@@ -17,18 +17,18 @@ if (path) {
     console.error('A fájl első sora üres.');
     process.exit(1);
   }
-  console.log(hashPassword(password));
+  console.log(await hashPassword(password));
 } else {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout, terminal: true });
   process.stdout.write('Jelszó: ');
-  rl.question('', (password) => {
+  rl.question('', async (password) => {
     rl.close();
     process.stdout.write('\n');
     if (!password) {
       console.error('Üres jelszó.');
       process.exit(1);
     }
-    console.log(hashPassword(password));
+    console.log(await hashPassword(password));
   });
   // Suppress the echo, so the password is not left on screen or in a scrollback.
   rl.output.write = (chunk, encoding, callback) => {

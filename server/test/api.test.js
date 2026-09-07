@@ -5,15 +5,17 @@
 // should not be on.
 
 import test from 'node:test';
+import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import { createApp } from '../src/app.js';
 import { seedDemoData, PRODUCTION_ID } from '../src/seed.js';
 import { hashPassword, verifyPassword } from '../src/passwords.js';
 import { reset as resetRateLimits } from '../src/ratelimit.js';
+import { _redactForTests } from '../src/log.js';
 import { config } from '../src/config.js';
 import * as db from '../src/db.js';
 
-seedDemoData();
+await seedDemoData();
 const server = createApp().listen(0);
 const base = `http://127.0.0.1:${server.address().port}`;
 test.after(() => server.close());
@@ -46,12 +48,12 @@ const CAMERA = 'kamera@flyabove.hu';
 const PROGRAM_CHANNEL = '44444444-4444-4444-8444-444444444444';
 const DIRECTOR_CHANNEL = '33333333-3333-4333-8333-333333333333';
 
-test('a jelszó hash sózott és ellenőrizhető', () => {
-  const first = hashPassword('titok');
-  const second = hashPassword('titok');
+test('a jelszó hash sózott és ellenőrizhető', async () => {
+  const first = await hashPassword('titok');
+  const second = await hashPassword('titok');
   assert.notEqual(first, second, 'két hash ugyanarra a jelszóra nem lehet azonos');
-  assert.ok(verifyPassword('titok', first));
-  assert.ok(!verifyPassword('titok2', first));
+  assert.ok(await verifyPassword('titok', first));
+  assert.ok(!await verifyPassword('titok2', first));
   assert.ok(!first.includes('titok'));
 });
 
@@ -252,7 +254,7 @@ test('privát hívást csak a két fél zárhat le', async () => {
   const outsider = db.createUser({
     email: `kivul-${Date.now()}@flyabove.hu`,
     displayName: 'Kívülálló',
-    passwordHash: hashPassword('flyabove'),
+    passwordHash: await hashPassword('flyabove'),
   });
   db.addMember({ productionId: PRODUCTION_ID, userId: outsider.id, role: 'admin' });
   const outsiderSession = (await login(outsider.email)).json;
@@ -290,7 +292,7 @@ test('a meghívó egyszer használható és lejár', async () => {
   const newcomer = db.createUser({
     email: `uj-${Date.now()}@flyabove.hu`,
     displayName: 'Új Kolléga',
-    passwordHash: hashPassword('flyabove'),
+    passwordHash: await hashPassword('flyabove'),
   });
   const session = (await login(newcomer.email)).json;
 
@@ -308,12 +310,18 @@ test('a meghívó egyszer használható és lejár', async () => {
   assert.equal(again.status, 404);
   assert.equal(again.json.error.code, 'invite_used');
 
-  // An expired invite is refused even though it was never spent.
-  const expired = (await call(`v1/productions/${PRODUCTION_ID}/invites`, {
-    method: 'POST', token: admin.accessToken, body: { expiresInMinutes: -1 },
-  })).json;
-  const stale = await call(`v1/invites/${expired.code}`, { token: session.accessToken });
-  assert.equal(stale.json.error.code, 'invite_expired');
+  // An expired invite is refused even though it was never spent. Written
+  // straight to the database, because the endpoint now refuses to issue one
+  // that is already expired.
+  const stale = db.createInvite({
+    code: 'ELJART',
+    productionId: PRODUCTION_ID,
+    createdBy: admin.user.id,
+    role: 'operator',
+    expiresAt: new Date(Date.now() - 60_000),
+  });
+  const refused = await call(`v1/invites/${stale.code}`, { token: session.accessToken });
+  assert.equal(refused.json.error.code, 'invite_expired');
 });
 
 test('a beváltás nem ad hozzáférést privát vonalakhoz', async () => {
@@ -329,7 +337,7 @@ test('a beváltás nem ad hozzáférést privát vonalakhoz', async () => {
   const newcomer = db.createUser({
     email: `keso-${Date.now()}@flyabove.hu`,
     displayName: 'Késői Érkező',
-    passwordHash: hashPassword('flyabove'),
+    passwordHash: await hashPassword('flyabove'),
   });
   const session = (await login(newcomer.email)).json;
   await call(`v1/invites/${invite.code}/redeem`, { method: 'POST', token: session.accessToken });
@@ -391,4 +399,178 @@ test('ismeretlen végpont a szerződés hibaformátumát adja', async () => {
   const response = await call('v1/nincs-ilyen');
   assert.equal(response.status, 404);
   assert.equal(response.json.error.code, 'not_found');
+});
+
+// The properties below are not about what an endpoint answers but about how it
+// answers: how long it takes, how much it returns, and what it does under a
+// burst. None of them fail as an error message.
+
+test('az ismeretlen e-mail nem válaszol gyorsabban', async () => {
+  resetRateLimits();
+  const sample = async (email) => {
+    const started = performance.now();
+    await login(email, 'biztosan-rossz');
+    return performance.now() - started;
+  };
+  // Warm up: the first hash pays for page faults that would skew the average.
+  for (let i = 0; i < 3; i += 1) await sample(OPERATOR);
+
+  const rounds = 12;
+  let known = 0;
+  let unknown = 0;
+  for (let i = 0; i < rounds; i += 1) {
+    resetRateLimits();
+    // Interleaved, so a machine that gets busy mid-test skews both equally.
+    known += await sample(OPERATOR);
+    unknown += await sample('nincs-ilyen-fiok@flyabove.hu');
+  }
+  const ratio = (known / rounds) / (unknown / rounds);
+  // Before the decoy hash this ratio was about 66×, which tells anybody who
+  // asks which addresses have accounts.
+  assert.ok(ratio > 0.5 && ratio < 2,
+    `az időzítés elárulja a fiók létezését: ${ratio.toFixed(1)}× (${(known / rounds).toFixed(1)} ms kontra ${(unknown / rounds).toFixed(1)} ms)`);
+});
+
+test('a jelszóhash nem blokkolja az event loopot', async () => {
+  resetRateLimits();
+  const burst = Array.from({ length: 20 }, (_, index) =>
+    login(`terheles-${index}@flyabove.hu`, 'rossz'));
+  // The requests have to actually arrive and start hashing; measuring before
+  // they do measures nothing, and the synchronous version passes.
+  await new Promise((resolve) => { setTimeout(resolve, 20); });
+
+  const started = performance.now();
+  const health = await call('health');
+  const elapsed = performance.now() - started;
+  await Promise.all(burst);
+
+  assert.equal(health.status, 200);
+  // Measured on this machine: 1.5 ms with the async hash, 62.8 ms with
+  // `scryptSync`, and 132.5 ms with neither the async form nor the
+  // concurrency cap. Every other request in the process waits behind the
+  // passwords.
+  assert.ok(elapsed < 25, `/health ${elapsed.toFixed(1)} ms-ot várt a hash-ekre`);
+});
+
+test('a naplózó a titkot elnevezéstől függetlenül kitakarja', () => {
+  const nested = { a: { b: { c: { d: { e: { f: { token: 'MELYEN-ELREJTVE' } } } } } } };
+  const scrubbed = JSON.stringify(_redactForTests({
+    password: 'A',
+    Authorization: 'Bearer SECRET-B',
+    access_token: 'SECRET-C',
+    'Refresh-Token': 'SECRET-D',
+    message: 'a fejléc: Authorization: Bearer SECRET-E volt',
+    payload: 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ4In0.SECRET-F',
+    ...nested,
+  }));
+
+  for (const secret of ['SECRET-B', 'SECRET-C', 'SECRET-D', 'SECRET-E', 'SECRET-F', 'MELYEN-ELREJTVE']) {
+    assert.ok(!scrubbed.includes(secret), `${secret} kiszivárgott: ${scrubbed}`);
+  }
+});
+
+test('a hibás JSON és a túl nagy törzs a hívó hibája', async () => {
+  const malformed = await fetch(`${base}/v1/auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: '{nem json',
+  });
+  assert.equal(malformed.status, 400);
+  assert.equal((await malformed.json()).error.code, 'invalid_request');
+
+  const huge = await fetch(`${base}/v1/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email: 'a@b.hu', password: 'x'.repeat(200_000) }),
+  });
+  assert.equal(huge.status, 413);
+});
+
+test('a meghívó élettartama korlátos', async () => {
+  const admin = (await login(OPERATOR)).json;
+  for (const minutes of [0, -1, 1.5, 'sok', Infinity, 60 * 24 * 400]) {
+    const response = await call(`v1/productions/${PRODUCTION_ID}/invites`, {
+      method: 'POST', token: admin.accessToken, body: { expiresInMinutes: minutes },
+    });
+    assert.equal(response.status, 400, `${minutes} percet elfogadott`);
+    assert.equal(response.json.error.code, 'invalid_request');
+  }
+  const fine = await call(`v1/productions/${PRODUCTION_ID}/invites`, {
+    method: 'POST', token: admin.accessToken, body: { expiresInMinutes: 30 },
+  });
+  assert.equal(fine.status, 201);
+});
+
+test('a realtime kérés deduplikál és felső korlátja van', async () => {
+  const admin = (await login(OPERATOR)).json;
+  const channelIds = (await call(`v1/productions/${PRODUCTION_ID}/channels`, {
+    token: admin.accessToken,
+  })).json.map((c) => c.id);
+
+  // A thousand repeats of one legal id used to produce a thousand tokens in a
+  // 692 KB response: an authenticated request costing the server far more than
+  // the caller.
+  const repeated = await call(`v1/productions/${PRODUCTION_ID}/rt-tokens`, {
+    method: 'POST',
+    token: admin.accessToken,
+    body: { channelIds: Array(1000).fill(channelIds[0]) },
+  });
+  assert.equal(repeated.status, 200);
+  assert.equal(repeated.json.grants.length, 1);
+  assert.ok(repeated.text.length < 20_000, `a válasz ${repeated.text.length} bájt`);
+
+  const tooMany = await call(`v1/productions/${PRODUCTION_ID}/rt-tokens`, {
+    method: 'POST',
+    token: admin.accessToken,
+    body: { channelIds: Array.from({ length: 65 }, () => crypto.randomUUID()) },
+  });
+  assert.equal(tooMany.status, 400);
+
+  const notAnArray = await call(`v1/productions/${PRODUCTION_ID}/rt-tokens`, {
+    method: 'POST', token: admin.accessToken, body: { channelIds: 'mind' },
+  });
+  assert.equal(notAnArray.status, 400);
+});
+
+test('a válasz biztonsági fejléceket hoz', async () => {
+  const response = await fetch(`${base}/health`);
+  assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(response.headers.get('x-frame-options'), 'DENY');
+  assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
+  assert.equal(response.headers.get('x-powered-by'), null);
+});
+
+test('a kijelentkezés az access tokent is visszavonja', async () => {
+  const session = (await login(OPERATOR)).json;
+  assert.equal((await call('v1/productions', { token: session.accessToken })).status, 200);
+
+  assert.equal((await call('v1/auth/logout', {
+    method: 'POST', token: session.accessToken,
+  })).status, 204);
+
+  // A signed token is otherwise valid until it expires: without this, logging
+  // out of a lost phone leaves REST access open for the rest of the token's
+  // life.
+  const replayed = await call('v1/productions', { token: session.accessToken });
+  assert.equal(replayed.status, 401, 'a kijelentkezés utáni access token még működik');
+
+  // And a fresh login works normally afterwards.
+  const again = (await login(OPERATOR)).json;
+  assert.equal((await call('v1/productions', { token: again.accessToken })).status, 200);
+});
+
+test('a párhuzamos hash-ek memóriaigénye korlátos', async () => {
+  resetRateLimits();
+  // Each scrypt at these parameters wants about 32 MB. Without a cap on how
+  // many run at once, the memory cost of a login burst is set by whoever is
+  // sending it.
+  const before = process.memoryUsage().rss;
+  let peak = before;
+  const watch = setInterval(() => { peak = Math.max(peak, process.memoryUsage().rss); }, 5);
+
+  await Promise.all(Array.from({ length: 60 }, (_, index) =>
+    login(`memoria-${index}@flyabove.hu`, 'rossz')));
+  clearInterval(watch);
+
+  const growth = (peak - before) / 1024 / 1024;
+  // Measured on this machine: 165 MB peak with the cap, 230 MB without.
+  assert.ok(growth < 120, `a csúcs ${growth.toFixed(0)} MB-tal nőtt`);
 });

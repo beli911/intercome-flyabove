@@ -13,7 +13,7 @@ import * as db from './db.js';
 export function issueAccessToken(user) {
   const expiresIn = config.accessTokenTtlSeconds;
   const token = jwt.sign(
-    { sub: user.id, email: user.email, name: user.display_name },
+    { sub: user.id, email: user.email, name: user.display_name, sv: user.session_version },
     config.jwtSecret,
     { expiresIn, issuer: 'flycom', audience: 'flycom-app' },
   );

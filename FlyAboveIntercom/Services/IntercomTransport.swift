@@ -71,6 +71,7 @@ enum IntercomTransportError: LocalizedError {
     case unknownChannel
     case notPermittedToTalk
     case realtime(message: String)
+    case invalidServerResponse(reason: String)
 
     var errorDescription: String? {
         switch self {
@@ -80,6 +81,8 @@ enum IntercomTransportError: LocalizedError {
         case .unknownChannel: "Ismeretlen csatorna."
         case .notPermittedToTalk: "Ezen a csatornán nincs beszédjogosultságod."
         case let .realtime(message): message
+        case let .invalidServerResponse(reason): "A szerver válasza értelmezhetetlen: \(reason)"
+
         }
     }
 }

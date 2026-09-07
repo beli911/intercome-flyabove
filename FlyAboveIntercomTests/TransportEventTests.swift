@@ -45,3 +45,45 @@ final class TransportEventTests: XCTestCase {
         }
     }
 }
+
+/// Grants arrive from the network, so the code that indexes them has to treat a
+/// malformed response as an error rather than as an impossibility.
+final class GrantIndexingTests: XCTestCase {
+    private func grant(channel: UUID, canPublish: Bool = true) -> RealtimeGrant {
+        RealtimeGrant(
+            channelId: channel,
+            roomName: "p_x.c_\(channel.uuidString.lowercased())",
+            token: "token",
+            expiresAt: Date().addingTimeInterval(3600),
+            canPublish: canPublish,
+            canSubscribe: true
+        )
+    }
+
+    func testDistinctChannelsAreIndexed() throws {
+        let first = UUID()
+        let second = UUID()
+        let indexed = try LiveKitIntercomTransport.grantsByChannel([
+            grant(channel: first), grant(channel: second)
+        ])
+        XCTAssertEqual(indexed.count, 2)
+        XCTAssertEqual(indexed[first]?.channelId, first)
+    }
+
+    func testARepeatedChannelIsAReadableErrorNotATrap() {
+        let channel = UUID()
+        // Two grants for one channel differ in what they permit, so silently
+        // keeping the last one would make publish rights depend on response
+        // order.
+        XCTAssertThrowsError(
+            try LiveKitIntercomTransport.grantsByChannel([
+                grant(channel: channel, canPublish: false),
+                grant(channel: channel, canPublish: true)
+            ])
+        ) { error in
+            guard case IntercomTransportError.invalidServerResponse = error else {
+                return XCTFail("Nem a várt hiba: \(error)")
+            }
+        }
+    }
+}

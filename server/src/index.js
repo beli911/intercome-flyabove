@@ -6,11 +6,12 @@ import { seedDemoData } from './seed.js';
 assertConfigured();
 
 if (config.seedDemo) {
-  seedDemoData({ password: process.env.SEED_PASSWORD ?? 'flyabove' });
+  await seedDemoData({ password: process.env.SEED_PASSWORD ?? 'flyabove' });
 }
 
-const server = createApp().listen(config.port, '0.0.0.0', () => {
+const server = createApp().listen(config.port, config.host, () => {
   log.info('Flycom API elindult', {
+    host: config.host,
     port: config.port,
     livekit: config.livekit.url,
     production: config.isProduction,

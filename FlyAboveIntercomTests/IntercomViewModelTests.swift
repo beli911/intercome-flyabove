@@ -511,6 +511,31 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertEqual(subject.configuration.channels[2].volume, 0.5)
     }
 
+    func testADuplicateChannelInTheResponseIsRefusedNotFatal() async {
+        let (subject, _, _) = await makeConnectedSubject()
+        let channels = subject.configuration.channels
+        let originalName = channels[0].name
+
+        // The server names one channel twice. This used to trap in
+        // `Dictionary(uniqueKeysWithValues:)` — a malformed response taking the
+        // app off the air, mid-broadcast, with no diagnosis.
+        await subject.applyUpdatedChannels([
+            descriptor(channels[0], name: "Első"),
+            descriptor(channels[0], name: "Második"),
+            descriptor(channels[1]),
+            descriptor(channels[2])
+        ])
+
+        // Nothing is applied: which of the two copies won would otherwise
+        // depend on the order the server happened to send them in.
+        XCTAssertEqual(subject.configuration.channels.count, channels.count)
+        XCTAssertEqual(subject.configuration.channels[0].name, originalName)
+        XCTAssertTrue(
+            subject.events.entries.contains { $0.code == .invalidServerResponse },
+            "A hibás választ nem naplózta, így senki nem tudja, mi történt."
+        )
+    }
+
     func testANewChannelFollowsTheServersDefault() async {
         let (subject, _, _) = await makeConnectedSubject()
         let newChannel = ChannelDescriptor(

@@ -2,15 +2,23 @@ import express from 'express';
 import { config } from './config.js';
 import { log } from './log.js';
 import * as db from './db.js';
-import { verifyPassword } from './passwords.js';
+import { burnPasswordWork, verifyPassword } from './passwords.js';
 import { issueAccessToken, issueRefreshToken, rotateRefreshToken, verifyAccessToken } from './tokens.js';
 import { consume, forget, limiter } from './ratelimit.js';
 import { generateInviteCode } from './invites.js';
 import {
-  broadcastConfiguration, issueRoomToken, listParticipants, removeParticipant, roomName,
+  broadcastConfiguration, evictParticipant, issueRoomToken, listParticipants,
+  removeParticipant, roomName, updateParticipantPermission,
 } from './livekit.js';
 
 const INVITE_TTL_MINUTES = 60 * 12;
+/// More lines than any production has, and few enough that one request cannot
+/// cost the server a megabyte of signed tokens.
+const MAX_CHANNELS_PER_REQUEST = 64;
+/// A minute to a week. An invite is a temporary way in; one that lasts a month
+/// is a permanent way in for whoever still has the group chat.
+const MIN_INVITE_MINUTES = 1;
+const MAX_INVITE_MINUTES = 60 * 24 * 7;
 const ADMIN_ROLES = new Set(['supervisor', 'admin']);
 
 /// Swift encodes UUIDs uppercase; the database stores them lowercase.
@@ -24,7 +32,35 @@ export function createApp() {
   const app = express();
   if (config.trustProxy) app.set('trust proxy', 1);
   app.disable('x-powered-by');
+
+  app.use((_req, res, next) => {
+    // Narrow on purpose. There is no browser client, so CORS stays absent and
+    // a same-origin policy has nothing to relax.
+    res.set('X-Content-Type-Options', 'nosniff');
+    res.set('X-Frame-Options', 'DENY');
+    res.set('Referrer-Policy', 'no-referrer');
+    res.set('Cache-Control', 'no-store');
+    // HSTS is the TLS proxy's job, but stating it here means it holds even if a
+    // deployment forgets to configure the proxy.
+    if (config.isProduction) {
+      res.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+    }
+    return next();
+  });
+
   app.use(express.json({ limit: '64kb' }));
+
+  // A malformed body is the caller's mistake, not a server fault: answering
+  // 500 tells them to retry, and they will.
+  app.use((error, _req, res, next) => {
+    if (error instanceof SyntaxError && 'body' in error) {
+      return fail(res, 400, 'invalid_request', 'A kérés törzse nem érvényes JSON.');
+    }
+    if (error?.type === 'entity.too.large') {
+      return fail(res, 413, 'invalid_request', 'A kérés törzse túl nagy.');
+    }
+    return next(error);
+  });
 
   // MARK: - Middleware
 
@@ -38,6 +74,12 @@ export function createApp() {
 
     const user = db.findUserById(payload.sub);
     if (!user) return fail(res, 401, 'token_expired', 'A felhasználó már nem létezik.');
+
+    // A signed token is otherwise valid until it expires, so logging out of a
+    // lost phone would leave REST access open for the rest of the token's life.
+    if (payload.sv !== user.session_version) {
+      return fail(res, 401, 'token_expired', 'A munkamenet megszűnt.');
+    }
 
     req.user = user;
     return next();
@@ -72,7 +114,7 @@ export function createApp() {
   // of whether the attempts succeed.
   const loginFloodLimiter = limiter({ name: 'login-flood', limit: 120, windowSeconds: 300 });
 
-  app.post('/v1/auth/login', loginFloodLimiter, (req, res) => {
+  app.post('/v1/auth/login', loginFloodLimiter, async (req, res) => {
     const { email, password, deviceName } = req.body ?? {};
     // Per address and per account: limiting only by address lets one attacker
     // lock every user out, limiting only by account lets a botnet spread out.
@@ -81,8 +123,12 @@ export function createApp() {
 
     const user = db.findUserByEmail(email);
     // The same answer whether the address is unknown or the password is wrong,
-    // so the endpoint does not confirm who has an account.
-    const correct = Boolean(user) && verifyPassword(String(password ?? ''), user.password_hash);
+    // and the same amount of work: an unknown address that returns sixty times
+    // faster tells the caller which addresses have accounts, however identical
+    // the response body is.
+    const correct = user
+      ? await verifyPassword(String(password ?? ''), user.password_hash)
+      : await burnPasswordWork(password);
 
     if (!correct) {
       const spent = consume({ key: attemptKey, limit, windowSeconds: config.loginWindowSeconds });
@@ -144,7 +190,8 @@ export function createApp() {
   });
 
   app.post('/v1/auth/logout', authenticate, (req, res) => {
-    db.revokeAllForUser(req.user.id);
+    db.endAllSessions(req.user.id);
+    log.info('kijelentkezés, minden munkamenet megszüntetve', { userId: req.user.id });
     return res.status(204).end();
   });
 
@@ -196,7 +243,16 @@ export function createApp() {
 
   app.post('/v1/productions/:productionId/invites',
     authenticate, withProduction, requireAdminRole, (req, res) => {
-      const minutes = Number(req.body?.expiresInMinutes ?? INVITE_TTL_MINUTES);
+      const requestedMinutes = req.body?.expiresInMinutes;
+      let minutes = INVITE_TTL_MINUTES;
+      if (requestedMinutes !== undefined) {
+        minutes = Number(requestedMinutes);
+        if (!Number.isFinite(minutes) || !Number.isInteger(minutes)
+          || minutes < MIN_INVITE_MINUTES || minutes > MAX_INVITE_MINUTES) {
+          return fail(res, 400, 'invalid_request',
+            `Az expiresInMinutes egész szám legyen ${MIN_INVITE_MINUTES} és ${MAX_INVITE_MINUTES} között.`);
+        }
+      }
       const code = generateInviteCode();
       const expiresAt = new Date(Date.now() + minutes * 60 * 1000);
       const role = ADMIN_ROLES.has(req.body?.role) || req.body?.role === 'operator'
@@ -272,6 +328,29 @@ export function createApp() {
   });
 
   // MARK: - Private calls
+
+  /// Reduces a participant's rights inside the live room, and removes them if
+  /// that cannot be confirmed.
+  ///
+  /// Fail-closed on purpose: the alternative to an eviction we are unsure about
+  /// is somebody talking on a line they were just removed from. The client
+  /// treats an eviction as a reconnect, and reconnecting mints a token with the
+  /// new rights.
+  async function enforceInRoom({ productionId, channelId, userId, canTalk, canListen }) {
+    const result = await updateParticipantPermission({
+      productionId, channelId, identity: userId, canPublish: canTalk, canSubscribe: canListen,
+    });
+    if (result.applied) return { userId, enforced: true };
+
+    // Nobody in the room means nothing to silence.
+    if (result.absent) return { userId, enforced: true };
+
+    const evicted = await evictParticipant({ productionId, channelId, identity: userId });
+    log.warn('jogosultság szobán belüli érvényesítése nem sikerült', {
+      productionId, channelId, userId, evicted, message: result.message,
+    });
+    return { userId, enforced: evicted };
+  }
 
   async function pushConfiguration(productionId) {
     const version = db.bumpConfigurationVersion();
@@ -357,23 +436,39 @@ export function createApp() {
 
       // Permission changes are the reason this push exists: a revoked Talk has
       // to reach a phone that is holding the button down.
+      const enforcement = [];
       if (req.body?.permissions && typeof req.body.permissions === 'object') {
         for (const [rawUserId, rights] of Object.entries(req.body.permissions)) {
           const userId = normalizeId(rawUserId);
           if (!db.membership(req.production.id, userId)) continue;
-          db.setPermission({
-            channelId,
-            userId,
-            canTalk: Boolean(rights?.canTalk),
-            canListen: Boolean(rights?.canListen),
-          });
+          const canTalk = Boolean(rights?.canTalk);
+          const canListen = Boolean(rights?.canListen);
+          const before = db.permissionFor(channelId, userId);
+          db.setPermission({ channelId, userId, canTalk, canListen });
+
+          // Only a reduction has to be enforced inside the room. Granting a
+          // right needs no intervention: the client asks for a new token.
+          if ((before.canTalk && !canTalk) || (before.canListen && !canListen)) {
+            enforcement.push(enforceInRoom({
+              productionId: req.production.id, channelId, userId, canTalk, canListen,
+            }));
+          }
         }
       }
 
+      const applied = await Promise.all(enforcement);
       const version = await pushConfiguration(req.production.id);
+
+      // The response says what was actually enforced. A `PATCH` that returns
+      // 200 while somebody is still publishing is the kind of answer that gets
+      // trusted for the rest of a broadcast.
+      const unenforced = applied.filter((result) => !result.enforced);
       return res.json({
         ...channelDescriptor(db.findChannel(channelId), req.user),
         version,
+        ...(unenforced.length > 0
+          ? { unenforced: unenforced.map((result) => result.userId) }
+          : {}),
       });
     });
 
@@ -381,8 +476,17 @@ export function createApp() {
 
   app.post('/v1/productions/:productionId/rt-tokens',
     authenticate, withProduction, async (req, res) => {
-      const requested = Array.isArray(req.body?.channelIds)
-        ? req.body.channelIds.map(normalizeId) : [];
+      if (!Array.isArray(req.body?.channelIds)) {
+        return fail(res, 400, 'invalid_request', 'A channelIds tömb kötelező.');
+      }
+      // Deduplicated and capped. Without this, a thousand repeats of one legal
+      // channel id produced a thousand tokens in a 692 KB response — an
+      // authenticated request that costs the server far more than the caller.
+      const requested = [...new Set(req.body.channelIds.map(normalizeId))];
+      if (requested.length > MAX_CHANNELS_PER_REQUEST) {
+        return fail(res, 400, 'invalid_request',
+          `Egyszerre legfeljebb ${MAX_CHANNELS_PER_REQUEST} csatornára kérhető token.`);
+      }
 
       const known = new Map(
         db.channelsForProduction(req.production.id).map((c) => [c.id, c]),
@@ -415,7 +519,13 @@ export function createApp() {
     app.get('/v1/debug/rooms/:roomName/participants', authenticate, async (req, res) => {
       const participants = await listParticipants(req.params.roomName);
       return res.json({
-        participants: participants.map((p) => ({ identity: p.identity, state: p.state })),
+        participants: participants.map((p) => ({
+          identity: p.identity,
+          state: p.state,
+          // What the server sees them publishing. A client's own opinion of
+          // whether it stopped is not evidence that it did.
+          trackCount: (p.tracks ?? []).length,
+        })),
       });
     });
 

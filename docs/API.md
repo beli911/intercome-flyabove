@@ -199,6 +199,7 @@ Minden nem 2xx válasz törzse:
 | `invite_expired` | 404 | A meghívó lejárt |
 | `invite_used` | 404 | A meghívót már felhasználták |
 | `invalid_peer` | 400 | Magával nem hívhat privát vonalat |
+| `invalid_request` | 400 / 413 | Hibás vagy túl nagy kérés |
 | `rate_limited` | 429 | Túl sok kérés |
 | `internal_error` | 500 | Szerverhiba |
 

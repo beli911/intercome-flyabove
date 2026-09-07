@@ -296,6 +296,82 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
         )
     }
 
+    /// The revocation that has to reach a live microphone.
+    ///
+    /// A room token carries `canPublish` for its whole hour, so a REST change
+    /// plus a data-channel push is not a security boundary: a modified, frozen,
+    /// or push-missing client keeps talking after the right was taken away.
+    /// What settles it is the server changing the permission inside the running
+    /// room, which unpublishes the track — and this test watches for exactly
+    /// that, from the server's own view of the room rather than the client's.
+    func testRevokingTalkStopsAPublishingClientServerSide() async throws {
+        // A separate auth session for the admin, so revoking rights does not
+        // disturb the session that is publishing.
+        let adminAuth = AuthService(
+            api: api,
+            store: InMemoryTokenStore(),
+            deviceName: "IntegrationTest-Admin"
+        )
+        _ = try await adminAuth.login(email: "operator@flyabove.hu", password: "flyabove")
+
+        let user = try await auth.login(email: "kamera@flyabove.hu", password: "flyabove")
+        let configuration = try await liveConfiguration(auth: auth)
+        let camera = try XCTUnwrap(configuration.channels.first { $0.name == "Kamera" })
+        XCTAssertTrue(camera.canTalk, "A teszt kiindulópontja, hogy van Talk joga.")
+
+        let production = try XCTUnwrap(configuration.productionID)
+        let transport = LiveKitIntercomTransport(api: api, auth: auth)
+        try await transport.connect(configuration: configuration)
+        try await transport.setTalking(true, channelID: camera.id)
+
+        let room = roomName(production: production, channel: camera.id)
+        // The room identity is the user id; that is what the server mints
+        // tokens with.
+        let identity = user.id.uuidString.lowercased()
+
+        // Confirm the microphone is genuinely open before revoking anything;
+        // a test that revokes against silence proves nothing.
+        let adminToken = try await adminAuth.validAccessToken()
+        let baseURL = Self.baseURL
+        let publishing = await poll(upTo: 15) {
+            await Self.publishedTrackCount(
+                identity: identity, inRoom: room, baseURL: baseURL, accessToken: adminToken
+            ) > 0
+        }
+        XCTAssertTrue(publishing, "A mikrofon nem nyílt meg, nincs mit visszavonni.")
+
+        try await patchPermissions(
+            production: production,
+            channel: camera.id,
+            userID: identity,
+            canTalk: false,
+            canListen: true,
+            auth: adminAuth
+        )
+
+        let silenced = await poll(upTo: 15) {
+            await Self.publishedTrackCount(
+                identity: identity, inRoom: room, baseURL: baseURL, accessToken: adminToken
+            ) == 0
+        }
+
+        await transport.disconnect()
+        // Restore the seeded rights, so whatever runs next starts where it expects.
+        try? await patchPermissions(
+            production: production,
+            channel: camera.id,
+            userID: identity,
+            canTalk: true,
+            canListen: true,
+            auth: adminAuth
+        )
+
+        XCTAssertTrue(
+            silenced,
+            "A Talk-jog elvétele után a kliens track-je a szerver szerint is aktív maradt."
+        )
+    }
+
     /// Grants live an hour. A room re-joined after a long outage must not
     /// present a token the server has stopped honouring, so the transport
     /// renews them well ahead of expiry.
@@ -489,8 +565,75 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     // MARK: - Helpers
 
     private struct DebugParticipants: Decodable {
-        struct Participant: Decodable { let identity: String }
+        struct Participant: Decodable {
+            let identity: String
+            /// How many tracks the server sees this participant publishing.
+            /// Optional so an older server still decodes.
+            let trackCount: Int?
+        }
         let participants: [Participant]
+    }
+
+    /// The server's own count of the participant's published tracks.
+    ///
+    /// Asking the client whether it stopped publishing would only prove that
+    /// the client thinks so, which is the exact assumption under test.
+    private static func publishedTrackCount(
+        identity: String,
+        inRoom roomName: String,
+        baseURL: URL,
+        accessToken: String
+    ) async -> Int {
+        do {
+            let encoded = roomName.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? roomName
+            var request = URLRequest(
+                url: baseURL.appendingPathComponent("v1/debug/rooms/\(encoded)/participants")
+            )
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let (data, _) = try await URLSession.intercom.data(for: request)
+            let decoded = try JSONDecoder.intercom.decode(DebugParticipants.self, from: data)
+            return decoded.participants.first { $0.identity == identity }?.trackCount ?? 0
+        } catch {
+            return 0
+        }
+    }
+
+    private func roomName(production: UUID, channel: UUID) -> String {
+        "p_\(production.uuidString.lowercased()).c_\(channel.uuidString.lowercased())"
+    }
+
+    private func patchPermissions(
+        production: UUID,
+        channel: UUID,
+        userID: String,
+        canTalk: Bool,
+        canListen: Bool,
+        auth: AuthService
+    ) async throws {
+        let accessToken = try await auth.validAccessToken()
+        var request = URLRequest(
+            url: Self.baseURL.appendingPathComponent(
+                "v1/productions/\(production.uuidString.lowercased())/channels/\(channel.uuidString.lowercased())"
+            )
+        )
+        request.httpMethod = "PATCH"
+        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "permissions": [userID: ["canTalk": canTalk, "canListen": canListen]],
+        ])
+        let (data, response) = try await URLSession.intercom.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        XCTAssertEqual(status, 200, "A jogosultság módosítása nem sikerült.")
+
+        // The server reports whom it could not enforce the change on. A silent
+        // 200 while somebody is still publishing is the answer that gets
+        // trusted for the rest of a broadcast.
+        let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        XCTAssertNil(
+            body?["unenforced"],
+            "A szerver nem tudta érvényesíteni a jogosultság-változást a szobában."
+        )
     }
 
     private func evictParticipant(_ identity: String, fromRoom roomName: String) async throws {
@@ -584,6 +727,24 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     /// Bounds a media step. LiveKit can wait indefinitely on a capture device
     /// the simulator does not have, and a hanging integration test is worse
     /// than a failing one.
+    /// Polls a condition until it holds or the time runs out.
+    ///
+    /// Different from `withDeadline`, which races one operation against a
+    /// clock: what a server-side change needs is repeated asking, because the
+    /// moment it becomes true is not observable from here.
+    private func poll(
+        upTo seconds: TimeInterval,
+        every interval: TimeInterval = 0.25,
+        until condition: @escaping @Sendable () async -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(seconds)
+        while Date() < deadline {
+            if await condition() { return true }
+            try? await Task.sleep(for: .seconds(interval))
+        }
+        return await condition()
+    }
+
     private func withDeadline(
         _ seconds: TimeInterval,
         _ operation: @escaping @Sendable () async throws -> Void

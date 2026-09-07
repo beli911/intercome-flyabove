@@ -102,7 +102,12 @@ actor LiveKitIntercomTransport: IntercomTransport {
             )
 
             serverURL = response.url
-            grants = Dictionary(uniqueKeysWithValues: response.grants.map { ($0.channelId, $0) })
+            // Not `uniqueKeysWithValues`: that traps on a duplicate, so a
+            // server that repeats a channel takes the app down instead of
+            // producing an error anybody can read. And silently keeping the
+            // last one is worse than refusing — which grant won would depend
+            // on response order.
+            grants = try Self.grantsByChannel(response.grants)
             self.configuration = configuration
 
             // Join everything the user is already listening to. Talk-only
@@ -136,6 +141,25 @@ actor LiveKitIntercomTransport: IntercomTransport {
             wantsListening.remove(channelID)
             await releaseRoomIfUnwanted(channelID: channelID)
         }
+    }
+
+    /// Indexes grants by channel, refusing a response that names one twice.
+    ///
+    /// The failure has to be a readable error rather than a trap: this is
+    /// network input, and a client that crashes on a malformed response is a
+    /// client that a broken deploy takes off the air with no diagnosis.
+    static func grantsByChannel(
+        _ grants: [RealtimeGrant]
+    ) throws -> [UUID: RealtimeGrant] {
+        var byChannel: [UUID: RealtimeGrant] = [:]
+        for grant in grants {
+            guard byChannel.updateValue(grant, forKey: grant.channelId) == nil else {
+                throw IntercomTransportError.invalidServerResponse(
+                    reason: "ugyanaz a csatorna kétszer szerepel a grantok között"
+                )
+            }
+        }
+        return byChannel
     }
 
     func setTalking(_ enabled: Bool, channelID: UUID) async throws {
@@ -424,6 +448,11 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// A failure is not fatal: the existing grants stay in place and the next
     /// tick tries again. Losing them would turn a recoverable outage into a
     /// forced re-login.
+    ///
+    /// A success, though, replaces the whole map rather than merging into it.
+    /// A grant the server has stopped issuing has been revoked, and merging
+    /// would leave the old one behind for recovery to reuse — the one path that
+    /// could put somebody back on a line they were removed from.
     @discardableResult
     private func renewGrants() async -> Bool {
         guard let configuration, let productionID = configuration.productionID else { return false }
@@ -434,8 +463,21 @@ actor LiveKitIntercomTransport: IntercomTransport {
                 channelIDs: configuration.channels.map(\.id),
                 accessToken: accessToken
             )
+            // Validate before replacing: a rejected response must leave the
+            // working grants untouched.
+            let renewed = try Self.grantsByChannel(response.grants)
             serverURL = response.url
-            for grant in response.grants { grants[grant.channelId] = grant }
+
+            let withdrawn = Set(grants.keys).subtracting(renewed.keys)
+            grants = renewed
+
+            // Close what is no longer granted. Leaving the session up would
+            // keep audio flowing on a channel the server just took away.
+            for channelID in withdrawn {
+                wantsTalking.remove(channelID)
+                wantsListening.remove(channelID)
+                await leave(channelID: channelID)
+            }
             return true
         } catch {
             return false

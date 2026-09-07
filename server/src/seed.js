@@ -49,12 +49,12 @@ const USERS = [
   },
 ];
 
-export function seedDemoData({ password = 'flyabove' } = {}) {
+export async function seedDemoData({ password = 'flyabove' } = {}) {
   const existing = db.prepare('SELECT COUNT(*) AS count FROM users').get();
   if (existing.count > 0) return false;
 
   const now = new Date().toISOString();
-  const passwordHash = hashPassword(password);
+  const passwordHash = await hashPassword(password);
 
   const insert = db.transaction(() => {
     db.prepare('INSERT INTO productions (id, name, created_at) VALUES (?, ?, ?)')
