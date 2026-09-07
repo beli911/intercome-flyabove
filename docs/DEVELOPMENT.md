@@ -75,7 +75,7 @@ gyakori, és a szövegétől függ, hogy hol keresi az ember.
 ## Új szerverre kötés
 
 ```bash
-node scripts/check-api.mjs --base <url> --email <e-mail> --password <jelszó>
+node scripts/check-api.mjs --base <url> --email <e-mail>
 ```
 
 Előbb ezt, aztán a buildet: egy szerződéstől eltérő szerver a telefonon

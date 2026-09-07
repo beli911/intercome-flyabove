@@ -300,8 +300,12 @@ megtudni:
 
 ```bash
 node scripts/check-api.mjs --base https://api.pelda.hu/ \
-  --email teszt@pelda.hu --password '…' --peer-email masik@pelda.hu
+  --email teszt@pelda.hu --peer-email masik@pelda.hu
 ```
+
+A jelszót a terminálról kéri be. Scriptből `--password-env VAR` vagy
+`--password-file F`; `--password` szándékosan nincs, mert a shell előzményében
+és a folyamatlistában is látszana.
 
 Végigméri a fenti szerződést, és megnevezi, ami eltér. A `--skip-writes` a
 csak olvasó ellenőrzésekre szorít; enélkül kiad egy meghívót és nyit-zár egy

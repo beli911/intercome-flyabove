@@ -41,8 +41,8 @@ tartozó teszt elbukik.
 Szerződés-ellenőrzés futó szerver ellen:
 
 ```bash
-node ../scripts/check-api.mjs --base http://localhost:8080/ \
-  --email operator@flyabove.hu --password flyabove --peer-email kamera@flyabove.hu
+SEED_PASSWORD=flyabove node ../scripts/check-api.mjs --base http://localhost:8080/ \
+  --email operator@flyabove.hu --password-env SEED_PASSWORD --peer-email kamera@flyabove.hu
 ```
 
 ## Éles üzembe helyezés

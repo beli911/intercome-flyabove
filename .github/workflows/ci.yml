@@ -1,0 +1,249 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    # The implicit shell is `bash -e {0}` without pipefail, which would let a
+    # failing `xcodebuild | tee` report tee's exit code instead. Naming bash
+    # explicitly gets `-eo pipefail`.
+    shell: bash
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Not pinned: the app uses iOS 26 APIs (AVAudioSession.allowBluetoothHFP),
+      # so it needs whatever the newest installed Xcode is, not a fixed one.
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+
+      - name: Install API dependencies
+        working-directory: server
+        run: npm ci
+
+      - name: Audit API dependencies
+        working-directory: server
+        run: npm audit --omit=dev
+
+      # The server's own suite covers what the iOS tests cannot see: token
+      # rotation, role checks, timing, and the event loop under load.
+      - name: Test the API
+        working-directory: server
+        run: npm test
+
+      - name: Install LiveKit server
+        run: brew install livekit
+
+      # The LiveKit integration tests skip themselves when the stack is absent.
+      # Starting it here is what makes them a required check rather than an
+      # optional one that quietly passes by doing nothing.
+      - name: Start LiveKit and the API
+        run: |
+          livekit-server --dev --bind 0.0.0.0 > /tmp/livekit.log 2>&1 &
+          (cd server && SEED_DEMO=1 DATABASE_PATH=/tmp/flycom-ci.db \
+            LIVEKIT_URL=ws://127.0.0.1:7880 LIVEKIT_API_KEY=devkey \
+            LIVEKIT_API_SECRET=secret npm start > /tmp/dev-api.log 2>&1 &)
+          for _ in $(seq 1 30); do
+            lk=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:7880 || true)
+            api=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/v1/productions || true)
+            if [ "$lk" = "200" ] && [ "$api" = "401" ]; then
+              echo "dev stack up"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "dev stack did not come up"
+          cat /tmp/livekit.log /tmp/dev-api.log
+          exit 1
+
+      - name: Resolve Swift packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project FlyAboveIntercom.xcodeproj \
+            -scheme FlyAboveIntercom
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][0])")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      - name: Test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project FlyAboveIntercom.xcodeproj \
+            -scheme FlyAboveIntercom \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath /tmp/FlyAboveIntercom.xcresult \
+            -parallel-testing-enabled NO \
+            | tee /tmp/test.log
+
+      # The whole point of starting the dev stack is that the LiveKit suite runs
+      # for real. If it skipped, or if the count does not match exactly, the job
+      # must fail — otherwise a green tick would mean "measured nothing".
+      # Keep `expected` in step with the suite when tests are added.
+      # A server that drifts from docs/API.md shows up on a phone as errors
+      # appearing one at a time, each looking like an app fault.
+      - name: Check the API contract
+        run: |
+          node scripts/check-api.mjs --base http://127.0.0.1:8080/ \
+            --email operator@flyabove.hu --password-env SEED_PASSWORD \
+            --peer-email kamera@flyabove.hu
+        env:
+          SEED_PASSWORD: flyabove
+
+      - name: Require every LiveKit integration test
+        run: |
+          # Counted from the source, not hardcoded: a number kept in step by
+          # hand drifts, and a too-low expectation would let a silently
+          # dropped test pass the gate.
+          expected=$(grep -cE '^[[:space:]]+func test' \
+            FlyAboveIntercomTests/LiveKitTransportIntegrationTests.swift)
+          actual=$(grep -cE "^Test Case .*LiveKitTransportIntegrationTests.* passed \(" /tmp/test.log || true)
+          skipped=$(grep -c "was skipped" /tmp/test.log || true)
+          echo "integrációs sikeres: $actual (várt: $expected), kihagyott: $skipped"
+          if [ "$skipped" -ne 0 ]; then
+            grep "was skipped" /tmp/test.log
+            echo "::error::Kihagyott teszt: a dev stack nem futott."
+            exit 1
+          fi
+          if [ "$actual" -ne "$expected" ]; then
+            echo "::error::$actual integrációs teszt ment át $expected helyett."
+            exit 1
+          fi
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs
+          path: |
+            /tmp/test.log
+            /tmp/livekit.log
+            /tmp/dev-api.log
+            /tmp/FlyAboveIntercom.xcresult
+          if-no-files-found: ignore
+
+  stress:
+    name: PTT stress
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Not pinned: the app uses iOS 26 APIs (AVAudioSession.allowBluetoothHFP),
+      # so it needs whatever the newest installed Xcode is, not a fixed one.
+      - name: Select the newest Xcode
+        run: |
+          ls -d /Applications/Xcode*.app
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][0])")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      # The PTT ordering bug was intermittent twice. A single green run is not
+      # evidence; repetition is.
+      - name: Repeat the view-model suite
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project FlyAboveIntercom.xcodeproj \
+            -scheme FlyAboveIntercom \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:FlyAboveIntercomTests/IntercomViewModelTests \
+            -test-iterations 30 \
+            -parallel-testing-enabled NO
+
+  release:
+    name: Release build
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+
+      # Debug builds hide optimisation-dependent problems, and the App Store
+      # gets the Release configuration — so that is the one that has to compile.
+      - name: Build Release
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project FlyAboveIntercom.xcodeproj \
+            -scheme FlyAboveIntercom \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
+
+  sanitizer:
+    name: Thread Sanitizer
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select the newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)/Contents/Developer"
+          xcodebuild -version
+
+      - name: Boot simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys;d=json.load(sys.stdin)['devices'];print([x['udid'] for k,v in d.items() if 'iOS' in k for x in v if x['name'].startswith('iPhone')][0])")
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          xcrun simctl boot "$UDID"
+          xcrun simctl bootstatus "$UDID" -b
+
+      # Without the integration suite: TSAN is looking for races in this code,
+      # and the LiveKit SDK's own threads would bury them in noise.
+      - name: Test under Thread Sanitizer
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project FlyAboveIntercom.xcodeproj \
+            -scheme FlyAboveIntercom \
+            -destination "platform=iOS Simulator,id=${{ steps.sim.outputs.udid }}" \
+            -skip-testing:FlyAboveIntercomTests/LiveKitTransportIntegrationTests \
+            -enableThreadSanitizer YES \
+            -parallel-testing-enabled NO

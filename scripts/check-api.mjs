@@ -8,9 +8,19 @@
 // it cleans up.
 //
 // Usage:
-//   node scripts/check-api.mjs --base https://api.example/ --email a@b --password x
+//   node scripts/check-api.mjs --base https://api.example/ --email a@b
+//     [--password-env VAR] read the password from an environment variable
+//     [--password-file F]  read it from the first line of a file
+//     (with neither, the password is asked for on the terminal)
 //     [--peer-email c@d]   another member, for the private-call checks
 //     [--skip-writes]      only the read-only checks
+//
+// There is deliberately no `--password` flag. A password on the command line is
+// in the shell history and in the process list, where anybody on the machine
+// can read it — and a usage example that shows one is how it gets there.
+
+import fs from 'node:fs';
+import readline from 'node:readline';
 
 const args = new Map();
 for (let i = 2; i < process.argv.length; i += 1) {
@@ -27,14 +37,59 @@ for (let i = 2; i < process.argv.length; i += 1) {
 
 const base = String(args.get('base') ?? '').replace(/\/*$/, '/');
 const email = args.get('email');
-const password = args.get('password');
 const peerEmail = args.get('peer-email');
 const skipWrites = Boolean(args.get('skip-writes'));
 
-if (!base || !email || !password) {
-  console.error('Használat: node scripts/check-api.mjs --base <url> --email <e-mail> --password <jelszó>');
+if (!base || !email) {
+  console.error('Használat: node scripts/check-api.mjs --base <url> --email <e-mail>');
+  console.error('  a jelszó: --password-env VAR, --password-file F, vagy terminálról');
   process.exit(2);
 }
+
+if (args.has('password')) {
+  console.error('A --password nem támogatott: a shell előzményében és a');
+  console.error('folyamatlistában is látszana. Használd a --password-env vagy');
+  console.error('a --password-file kapcsolót, vagy hagyd, hogy bekérje.');
+  process.exit(2);
+}
+
+async function resolvePassword() {
+  const fromEnv = args.get('password-env');
+  if (typeof fromEnv === 'string') {
+    const value = process.env[fromEnv];
+    if (!value) {
+      console.error(`A ${fromEnv} környezeti változó üres.`);
+      process.exit(2);
+    }
+    return value;
+  }
+
+  const fromFile = args.get('password-file');
+  if (typeof fromFile === 'string') {
+    const value = fs.readFileSync(fromFile, 'utf8').split('\n')[0];
+    if (!value) {
+      console.error(`A ${fromFile} első sora üres.`);
+      process.exit(2);
+    }
+    return value;
+  }
+
+  if (!process.stdin.isTTY) {
+    console.error('Nincs terminál a jelszó bekéréséhez; add meg a --password-env vagy a --password-file kapcsolót.');
+    process.exit(2);
+  }
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((resolve) => {
+    process.stdout.write(`Jelszó (${email}): `);
+    rl.question('', (value) => {
+      rl.close();
+      process.stdout.write('\n');
+      resolve(value);
+    });
+  });
+}
+
+const password = await resolvePassword();
 
 let passed = 0;
 let failed = 0;
