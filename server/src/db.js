@@ -12,6 +12,7 @@ import { config } from './config.js';
 export const db = new Database(config.databasePath);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
+db.pragma('busy_timeout = 5000');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS users (
@@ -313,7 +314,29 @@ export function findInvite(code) {
 
 export function redeemInvite(code, userId) {
   db.prepare('UPDATE invites SET redeemed_by = ?, redeemed_at = ? WHERE code = ?')
-    .run(userId, now(), code);
+    .run(userId, now(), String(code ?? '').toUpperCase());
+}
+
+export function atomicRedeemInvite({ code, userId, role, productionId }) {
+  const normCode = String(code ?? '').toUpperCase();
+  return db.transaction(() => {
+    const res = db.prepare(`
+      UPDATE invites
+      SET redeemed_by = ?, redeemed_at = ?
+      WHERE code = ? AND redeemed_by IS NULL AND datetime(expires_at) > datetime(?)
+    `).run(userId, now(), normCode, now());
+
+    if (res.changes !== 1) {
+      return false;
+    }
+
+    addMember({ productionId, userId, role });
+    for (const channel of channelsForProduction(productionId)) {
+      if (channel.is_private) continue;
+      setPermission({ channelId: channel.id, userId, canTalk: true, canListen: true });
+    }
+    return true;
+  })();
 }
 
 // MARK: - Private calls

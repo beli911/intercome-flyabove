@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import SwiftUI
 
 /// Live camera preview that reports the first QR code it reads.
@@ -19,11 +19,84 @@ struct QRScannerView: UIViewControllerRepresentable {
     func updateUIViewController(_: QRScannerViewController, context _: Context) {}
 }
 
+private final class QRScannerSessionCoordinator: @unchecked Sendable {
+    let session = AVCaptureSession()
+    private let sessionQueue = DispatchQueue(label: "hu.flyabove.qrscanner.session")
+    private var isDisposed = false
+
+    func configure(
+        delegate: AVCaptureMetadataOutputObjectsDelegate,
+        onUnavailable: @escaping @MainActor (String) -> Void
+    ) {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isDisposed else { return }
+            guard let device = AVCaptureDevice.default(for: .video),
+                  let input = try? AVCaptureDeviceInput(device: device),
+                  self.session.canAddInput(input)
+            else {
+                Task { @MainActor in
+                    onUnavailable("A kamera nem érhető el ezen az eszközön.")
+                }
+                return
+            }
+            self.session.addInput(input)
+
+            let output = AVCaptureMetadataOutput()
+            guard self.session.canAddOutput(output) else {
+                Task { @MainActor in
+                    onUnavailable("A QR-olvasó nem indítható.")
+                }
+                return
+            }
+            self.session.addOutput(output)
+            output.setMetadataObjectsDelegate(delegate, queue: .main)
+            // Set after adding the output, or the type is not yet available.
+            output.metadataObjectTypes = [.qr]
+        }
+    }
+
+    func start() {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isDisposed else { return }
+            guard !self.session.inputs.isEmpty else { return }
+            if !self.session.isRunning {
+                self.session.startRunning()
+            }
+        }
+    }
+
+    /// Stops the camera but keeps the session usable.
+    ///
+    /// Deliberately separate from `dispose()`. Leaving the view is not the end
+    /// of the scanner: the sheet can come back, and a scan that failed can be
+    /// tried again. A `stop` that also disposed made the second appearance a
+    /// black preview with no error at all — nothing to see and nothing to read.
+    func stop() {
+        sessionQueue.async { [weak self] in
+            guard let self, !self.isDisposed else { return }
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
+        }
+    }
+
+    /// Final teardown: after this the coordinator never starts again.
+    func dispose() {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.isDisposed = true
+            if self.session.isRunning {
+                self.session.stopRunning()
+            }
+        }
+    }
+}
+
 final class QRScannerViewController: UIViewController {
     var onCode: ((String) -> Void)?
     var onUnavailable: ((String) -> Void)?
 
-    private let session = AVCaptureSession()
+    private let coordinator = QRScannerSessionCoordinator()
     private var previewLayer: AVCaptureVideoPreviewLayer?
     /// One code per presentation: a scanner that keeps firing turns a single
     /// glance at a poster into a stream of redemption attempts.
@@ -36,48 +109,25 @@ final class QRScannerViewController: UIViewController {
     }
 
     private func configure() {
-        guard let device = AVCaptureDevice.default(for: .video),
-              let input = try? AVCaptureDeviceInput(device: device),
-              session.canAddInput(input)
-        else {
-            onUnavailable?("A kamera nem érhető el ezen az eszközön.")
-            return
-        }
-        session.addInput(input)
-
-        let output = AVCaptureMetadataOutput()
-        guard session.canAddOutput(output) else {
-            onUnavailable?("A QR-olvasó nem indítható.")
-            return
-        }
-        session.addOutput(output)
-        output.setMetadataObjectsDelegate(self, queue: .main)
-        // Set after adding the output, or the type is not yet available.
-        output.metadataObjectTypes = [.qr]
-
-        let layer = AVCaptureVideoPreviewLayer(session: session)
+        let layer = AVCaptureVideoPreviewLayer(session: coordinator.session)
         layer.videoGravity = .resizeAspectFill
         layer.frame = view.bounds
         view.layer.addSublayer(layer)
         previewLayer = layer
+
+        coordinator.configure(delegate: self) { [weak self] message in
+            self?.onUnavailable?(message)
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        guard !session.isRunning, !session.inputs.isEmpty else { return }
-        // Starting a capture session blocks, so it must not happen on the main
-        // thread. `AVCaptureSession` is not Sendable, but it is documented as
-        // safe to drive from one background queue at a time, and this is the
-        // only place that starts or stops it.
-        let session = session
-        DispatchQueue.global(qos: .userInitiated).async {
-            session.startRunning()
-        }
+        coordinator.start()
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
-        if session.isRunning { session.stopRunning() }
+        coordinator.stop()
     }
 
     override func viewDidLayoutSubviews() {
@@ -85,10 +135,17 @@ final class QRScannerViewController: UIViewController {
         previewLayer?.frame = view.bounds
     }
 
+    deinit {
+        // The camera must not outlive the controller: an AVCaptureSession left
+        // running keeps the hardware and the green indicator on.
+        coordinator.dispose()
+    }
+
     fileprivate func report(_ value: String) {
         guard !hasReported else { return }
         hasReported = true
-        session.stopRunning()
+        // One code per presentation, so this really is the end of this scanner.
+        coordinator.dispose()
         onCode?(value)
     }
 }

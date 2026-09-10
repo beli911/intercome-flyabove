@@ -21,15 +21,37 @@ const PARAMETERS = { N: 2 ** 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 
 /// Node's default thread pool is four threads, shared with file and DNS work.
 /// Two concurrent hashes leave room for everything else to keep moving.
-const MAX_CONCURRENT_HASHES = Number(process.env.PASSWORD_CONCURRENCY ?? 2);
+const maxConcurrentHashes = () => Number(process.env.PASSWORD_CONCURRENCY ?? 2);
+/// Read per call rather than at import, so a test can move the limit without
+/// reloading the module — a queue cap nothing exercises is a cap nobody knows
+/// the shape of.
+const maxWaitingHashes = () => Number(process.env.PASSWORD_MAX_WAITING ?? 128);
+
+/// Shedding load is not the same answer as "wrong credentials".
+///
+/// It needs its own type because everything downstream catches broadly: a
+/// refused queue slot that reaches the caller as `false` becomes "hibás e-mail
+/// vagy jelszó" for somebody who typed the right one — and at the login
+/// endpoint it also spends one of their rate-limited attempts, so enough load
+/// locks the real user out of their own account. Overload has to stay
+/// distinguishable all the way up to the response.
+export class PasswordQueueFullError extends Error {
+  constructor() {
+    super('A jelszó-ellenőrző sor megtelt.');
+    this.name = 'PasswordQueueFullError';
+  }
+}
 
 let running = 0;
 const waiting = [];
 
 function acquire() {
-  if (running < MAX_CONCURRENT_HASHES) {
+  if (running < maxConcurrentHashes()) {
     running += 1;
     return Promise.resolve();
+  }
+  if (waiting.length >= maxWaitingHashes()) {
+    return Promise.reject(new PasswordQueueFullError());
   }
   return new Promise((resolve) => waiting.push(resolve));
 }
@@ -79,7 +101,10 @@ export async function verifyPassword(password, stored) {
     // Constant time: a comparison that returns early leaks the hash one byte
     // at a time.
     return crypto.timingSafeEqual(expected, actual);
-  } catch {
+  } catch (error) {
+    // A malformed stored hash is a `false`. A refused queue slot is not: the
+    // caller has to be able to answer 503 instead of 401.
+    if (error instanceof PasswordQueueFullError) throw error;
     return false;
   }
 }

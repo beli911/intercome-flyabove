@@ -201,6 +201,7 @@ Minden nem 2xx válasz törzse:
 | `invalid_peer` | 400 | Magával nem hívhat privát vonalat |
 | `invalid_request` | 400 / 413 | Hibás vagy túl nagy kérés |
 | `rate_limited` | 429 | Túl sok kérés |
+| `overloaded` | 503 | A jelszó-ellenőrző sor megtelt. **Nem hitelesítési hiba:** a jelszó lehet helyes, és a kliens a `Retry-After` fejlécben megadott másodperc után újrapróbálhatja. Ez a válasz szándékosan **nem** számít bele a sikertelen bejelentkezések korlátjába |
 | `internal_error` | 500 | Szerverhiba |
 
 A `message` felhasználónak mutatható, magyar nyelvű szöveg. A kliens a `401`-et
@@ -277,6 +278,11 @@ broadcast után a csatorna mindkét kliensről eltűnik.
 
 Csak `supervisor` vagy `admin`. Módosítható: `name`, `detail`, `colorHex`, `role`, `duckDecibels`,
 valamint `permissions` felhasználónként (`{ "<userId>": { "canTalk", "canListen" } }`).
+
+**Privát hívás csatornájára `403 forbidden`.** Egy privát vonal nem
+adminisztrálható tétel: enélkül egy admin jogot adhatna magának rá, majd
+`rt-token`-t kérve belehallgathatna. A `POST /rt-tokens` ugyanezért csak a
+`private_call_members` tagjainak ad grantet privát csatornára.
 
 A szerver a változás után **minden csatorna LiveKit szobájába** adatüzenetet
 küld:

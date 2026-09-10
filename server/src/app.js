@@ -2,12 +2,12 @@ import express from 'express';
 import { config } from './config.js';
 import { log } from './log.js';
 import * as db from './db.js';
-import { burnPasswordWork, verifyPassword } from './passwords.js';
+import { burnPasswordWork, PasswordQueueFullError, verifyPassword } from './passwords.js';
 import { issueAccessToken, issueRefreshToken, rotateRefreshToken, verifyAccessToken } from './tokens.js';
 import { consume, forget, limiter } from './ratelimit.js';
 import { generateInviteCode } from './invites.js';
 import {
-  broadcastConfiguration, evictParticipant, issueRoomToken, listParticipants,
+  broadcastConfiguration, deleteRoom, evictParticipant, issueRoomToken, listParticipants,
   removeParticipant, roomName, updateParticipantPermission,
 } from './livekit.js';
 
@@ -126,9 +126,22 @@ export function createApp() {
     // and the same amount of work: an unknown address that returns sixty times
     // faster tells the caller which addresses have accounts, however identical
     // the response body is.
-    const correct = user
-      ? await verifyPassword(String(password ?? ''), user.password_hash)
-      : await burnPasswordWork(password);
+    let correct;
+    try {
+      correct = user
+        ? await verifyPassword(String(password ?? ''), user.password_hash)
+        : await burnPasswordWork(password);
+    } catch (error) {
+      // The hash queue is full. Answering 401 here would tell somebody with the
+      // right password that it is wrong, and spend one of their attempts doing
+      // it — a busy server would lock out exactly the people who can log in.
+      if (error instanceof PasswordQueueFullError) {
+        res.set('Retry-After', '2');
+        return fail(res, 503, 'overloaded',
+          'A szerver pillanatnyilag túlterhelt. Próbáld újra pár másodperc múlva.');
+      }
+      throw error;
+    }
 
     if (!correct) {
       const spent = consume({ key: attemptKey, limit, windowSeconds: config.loginWindowSeconds });
@@ -305,21 +318,15 @@ export function createApp() {
     const { invite, error } = inviteOrFailure(req.params.code);
     if (error) return fail(res, 404, error[0], error[1]);
 
-    db.addMember({
-      productionId: invite.production_id, userId: req.user.id, role: invite.role,
+    const redeemed = db.atomicRedeemInvite({
+      code: invite.code,
+      userId: req.user.id,
+      role: invite.role,
+      productionId: invite.production_id,
     });
-    // Redeeming grants the production's non-private channels at the invite's
-    // role. Anything finer is the admin's call afterwards.
-    for (const channel of db.channelsForProduction(invite.production_id)) {
-      if (channel.is_private) continue;
-      db.setPermission({
-        channelId: channel.id,
-        userId: req.user.id,
-        canTalk: true,
-        canListen: true,
-      });
+    if (!redeemed) {
+      return fail(res, 404, 'invite_used', 'Ezt a meghívót már felhasználták.');
     }
-    db.redeemInvite(invite.code, req.user.id);
 
     const production = db.productionsForUser(req.user.id)
       .find((p) => p.id === invite.production_id);
@@ -411,6 +418,7 @@ export function createApp() {
         return fail(res, 403, 'forbidden', 'Nem vagy résztvevője ennek a hívásnak.');
       }
 
+      await deleteRoom(roomName(req.production.id, channelId));
       db.deleteChannel(channelId);
       await pushConfiguration(req.production.id);
       return res.status(204).end();
@@ -424,6 +432,9 @@ export function createApp() {
       const channel = db.findChannel(channelId);
       if (!channel || channel.production_id !== req.production.id) {
         return fail(res, 404, 'not_found', 'Nincs ilyen csatorna.');
+      }
+      if (channel.is_private) {
+        return fail(res, 403, 'forbidden', 'Privát hívás csatornája nem módosítható.');
       }
 
       const fields = {};
@@ -497,6 +508,10 @@ export function createApp() {
 
       const grants = [];
       for (const channelId of requested) {
+        const channel = known.get(channelId);
+        if (channel?.is_private && !db.privateCallMembers(channelId).includes(req.user.id)) {
+          continue;
+        }
         const { canTalk, canListen } = db.permissionFor(channelId, req.user.id);
         // No grant at all for a channel the user has no business in: the
         // enforcement point is the token, not the client.

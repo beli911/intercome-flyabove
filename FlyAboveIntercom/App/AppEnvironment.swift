@@ -32,10 +32,17 @@ final class AppEnvironment: ObservableObject {
     /// with the code already in it.
     @Published var pendingInviteCode: String?
     @Published private(set) var isBusy = false
-    @Published var errorMessage: String?
+    @Published var errorMessage: String? {
+        didSet {
+            if let errorMessage, let intercom {
+                intercom.errorMessage = errorMessage
+            }
+        }
+    }
     /// Set when `Info.plist` carries a base URL the app refuses to use.
     @Published private(set) var configurationFailure: String?
 
+    private var lastAppliedConfigVersion = 0
     private let api: (any IntercomAPI)?
     private let auth: AuthService?
     private let audioSession: AudioSessionController
@@ -252,11 +259,16 @@ final class AppEnvironment: ObservableObject {
         intercom = nil
         selectedProduction = nil
         crew = []
+        lastAppliedConfigVersion = 0
         phase = .choosingProduction
     }
 
     private func enter(production: ProductionSummary) async throws {
         guard let api, let auth else { return }
+        if let previous = intercom {
+            await previous.disconnect()
+            intercom = nil
+        }
         let accessToken = try await auth.validAccessToken()
         let descriptors = try await api.channels(productionID: production.id, accessToken: accessToken)
         let restoredUser = await auth.restoredUser()
@@ -278,8 +290,8 @@ final class AppEnvironment: ObservableObject {
         )
         // The view model does not fetch; it applies. Fetching lives here,
         // where the API does.
-        viewModel.onConfigurationStale = { [weak self] _ in
-            await self?.refreshConfiguration(productionID: production.id)
+        viewModel.onConfigurationStale = { [weak self] version in
+            await self?.refreshConfiguration(productionID: production.id, version: version)
         }
         intercom = viewModel
         phase = .ready
@@ -294,7 +306,10 @@ final class AppEnvironment: ObservableObject {
     /// A failure here is not a reason to disturb the operator: the channels
     /// they have are the ones they were told about, and the next broadcast will
     /// bring another chance.
-    func refreshConfiguration(productionID: UUID) async {
+    func refreshConfiguration(productionID: UUID, version: Int? = nil) async {
+        if let version {
+            guard version > lastAppliedConfigVersion else { return }
+        }
         guard let api, let auth, let intercom else { return }
         do {
             let accessToken = try await auth.validAccessToken()
@@ -302,6 +317,10 @@ final class AppEnvironment: ObservableObject {
                 productionID: productionID,
                 accessToken: accessToken
             )
+            if let version {
+                guard version >= self.lastAppliedConfigVersion else { return }
+                self.lastAppliedConfigVersion = version
+            }
             await intercom.applyUpdatedChannels(descriptors)
             await loadCrew(productionID: productionID)
         } catch {

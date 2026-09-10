@@ -57,6 +57,9 @@ actor LiveKitIntercomTransport: IntercomTransport {
     /// the session it belonged to is gone must not install itself.
     private var sessionGeneration = 0
     private var lastConfigurationVersion = 0
+    private var lastPacketsLost: Int = 0
+    private var lastPacketsReceived: Int = 0
+    private var hasBaselineStats = false
     private var continuations: [UUID: AsyncStream<IntercomTransportEvent>.Continuation] = [:]
     private var statisticsTask: Task<Void, Never>?
     private var grantRenewalTask: Task<Void, Never>?
@@ -327,6 +330,9 @@ actor LiveKitIntercomTransport: IntercomTransport {
 
         statisticsTask?.cancel()
         statisticsTask = nil
+        hasBaselineStats = false
+        lastPacketsLost = 0
+        lastPacketsReceived = 0
         grantRenewalTask?.cancel()
         grantRenewalTask = nil
         configuration = nil
@@ -478,10 +484,38 @@ actor LiveKitIntercomTransport: IntercomTransport {
                 wantsListening.remove(channelID)
                 await leave(channelID: channelID)
             }
+
+            // Also silence talking on a channel that survived but lost publish:
+            // the removal case above never sees it, and the microphone would
+            // stay open locally on a line the server has already closed.
+            //
+            // The state change and the event go out first, and the device is
+            // told afterwards without waiting for it. Measured 2026-09-10:
+            // LiveKit's microphone call can block a cooperative thread
+            // indefinitely when the simulator's audio device wedges — and this
+            // loop runs on the renewal timer, so awaiting it here would let one
+            // stuck device stall grant renewal for every channel. What the
+            // operator needs to know is that the right was taken away; the
+            // hardware is allowed to take its time.
+            for (channelID, grant) in renewed
+            where !grant.canPublish && wantsTalking.contains(channelID) {
+                wantsTalking.remove(channelID)
+                emit(.talkStopped(channelID: channelID))
+                Task { [weak self] in await self?.silenceMicrophone(channelID: channelID) }
+            }
             return true
         } catch {
             return false
         }
+    }
+
+    /// Closes the local microphone for one channel, best effort.
+    ///
+    /// Separate so the caller can hand it off instead of awaiting it: a device
+    /// that will not answer must not hold up anything that already knows the
+    /// answer.
+    private func silenceMicrophone(channelID: UUID) async {
+        _ = try? await sessions[channelID]?.room.localParticipant.setMicrophone(enabled: false)
     }
 
     private func scheduleRecovery(channelID: UUID) {
@@ -515,6 +549,7 @@ actor LiveKitIntercomTransport: IntercomTransport {
             }
         }
 
+        roomStates[channelID] = .disconnected
         emit(.connectionStateChanged(.failed(
             message: "Egy vonal nem állítható helyre. Bontsd és csatlakozz újra."
         )))
@@ -549,14 +584,30 @@ actor LiveKitIntercomTransport: IntercomTransport {
         let pairs = statistics.flatMap(\.iceCandidatePair)
         guard let pair = pairs.first(where: { $0.nominated == true }) ?? pairs.first else { return }
 
-        // Loss is summed across every inbound stream rather than averaged: one
-        // badly behaved line is the thing worth surfacing, and averaging would
-        // hide it behind the healthy ones.
+        // Loss is calculated as a windowed delta across inbound streams:
+        // cumulative totals mask burst drops and permanently bias stats.
         let inbound = statistics.flatMap(\.inboundRtpStream)
-        let lost = inbound.compactMap(\.packetsLost).reduce(0, +)
-        let received = inbound.compactMap(\.packetsReceived).reduce(0, +)
-        let total = Double(lost) + Double(received)
-        let lossPercent = total > 0 ? Double(lost) / total * 100 : nil
+        let currentLost = inbound.compactMap(\.packetsLost).map(Int.init).reduce(0, +)
+        let currentReceived = inbound.compactMap(\.packetsReceived).map(Int.init).reduce(0, +)
+
+        let lossPercent: Double?
+        if hasBaselineStats {
+            let deltaLost = max(0, currentLost - lastPacketsLost)
+            let deltaReceived = max(0, currentReceived - lastPacketsReceived)
+            let deltaTotal = Double(deltaLost + deltaReceived)
+            // An empty window is not a clean one. "Nothing arrived and nothing
+            // was lost" is exactly what a dead line looks like, and `0.0` would
+            // print `LOSS 0.0%` on the monitor at the moment it stops being
+            // true. `nil` is the honest answer, and the display already has a
+            // word for it: `LOSS –`.
+            lossPercent = deltaTotal > 0 ? (Double(deltaLost) / deltaTotal) * 100.0 : nil
+        } else {
+            hasBaselineStats = true
+            let total = Double(currentLost + currentReceived)
+            lossPercent = total > 0 ? (Double(currentLost) / total) * 100.0 : nil
+        }
+        lastPacketsLost = currentLost
+        lastPacketsReceived = currentReceived
         let jitter = inbound.compactMap(\.jitter).max().map { $0 * 1000 }
 
         emit(.statistics(IntercomStatistics(

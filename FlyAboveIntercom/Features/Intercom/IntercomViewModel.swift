@@ -56,6 +56,8 @@ final class IntercomViewModel: ObservableObject {
     /// Incremented by every connect and disconnect, so a permission prompt that
     /// resolves after the user left cannot act on a session that is gone.
     private var sessionGeneration = 0
+    /// Incremented on each ducking recalculation to prevent async out-of-order race conditions.
+    private var duckingGeneration = 0
 
     private enum AppliedTalk: Sendable, Equatable {
         case off
@@ -393,6 +395,9 @@ final class IntercomViewModel: ObservableObject {
     /// so this can be called from anywhere the inputs might have moved without
     /// worrying about how often.
     func updateDucking() async {
+        duckingGeneration += 1
+        let currentGen = duckingGeneration
+
         let input = DuckingPolicy.Input(
             isPriorityActive: configuration.channels.contains {
                 $0.role == .priority && $0.isRemoteSpeaking
@@ -401,6 +406,7 @@ final class IntercomViewModel: ObservableObject {
         )
 
         for channel in configuration.channels {
+            guard currentGen == duckingGeneration else { return }
             let multiplier = DuckingPolicy.gainMultiplier(
                 for: channel.role,
                 input: input,
@@ -652,7 +658,8 @@ final class IntercomViewModel: ObservableObject {
             guard shouldResume, isConnected else { return }
             // Talk is momentary, so the finger has long left the button: restore
             // the session at the level the user is actually using.
-            try? await audioSession.activate(recording: isMicrophoneGranted == true)
+            let isTalking = desiredTalk.values.contains(true) && isMicrophoneGranted == true
+            try? await audioSession.activate(recording: isTalking)
 
         case let .routeChanged(reason, outputName):
             if outputName != audioRouteName {

@@ -57,5 +57,7 @@ final class InviteCodeTests: XCTestCase {
         XCTAssertNil(InviteCode.from(url: URL(string: "https://intercom.flyabove.hu/")!))
         // Too short after filtering: not a code, and must not be sent as one.
         XCTAssertNil(InviteCode.from(url: URL(string: "flyabove-intercom://invite/OI1")!))
+        // Non-invite URL with 6-character trailing component is rejected
+        XCTAssertNil(InviteCode.from(url: URL(string: "https://example.com/other/path/DM2PH4")!))
     }
 }

@@ -309,7 +309,7 @@ final class IntercomViewModelTests: XCTestCase {
     }
 
     func testAMicrophoneThatWillNotStopForcesTheSessionDown() async {
-        let (subject, transport, audio) = await makeConnectedSubject()
+        let (subject, transport, _) = await makeConnectedSubject()
         let channelID = try! XCTUnwrap(subject.configuration.channels.first?.id)
         await subject.setTalking(true, channelID: channelID)
         XCTAssertEqual(subject.activeTalkChannelCount, 1)

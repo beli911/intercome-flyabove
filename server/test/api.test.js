@@ -273,6 +273,43 @@ test('privát hívást csak a két fél zárhat le', async () => {
   assert.equal(db.findChannel(created.id), undefined);
 });
 
+test('privát hívás nem módosítható adminisztrátori PATCH-csel', async () => {
+  const camera = (await login(CAMERA)).json;
+  const sound = db.findUserByEmail('hang@flyabove.hu') ?? db.createUser({
+    email: 'hang@flyabove.hu', displayName: 'Hangmérnök', passwordHash: 'x',
+  });
+  if (!db.membership(PRODUCTION_ID, sound.id)) {
+    db.addMember({ productionId: PRODUCTION_ID, userId: sound.id, role: 'operator' });
+  }
+  const created = (await call(`v1/productions/${PRODUCTION_ID}/calls`, {
+    method: 'POST', token: camera.accessToken, body: { peerId: sound.id },
+  })).json;
+
+  const admin = (await login(OPERATOR)).json;
+  const patchResponse = await call(`v1/productions/${PRODUCTION_ID}/channels/${created.id}`, {
+    method: 'PATCH',
+    token: admin.accessToken,
+    body: {
+      permissions: { [admin.user.id]: { canTalk: true, canListen: true } },
+    },
+  });
+  assert.equal(patchResponse.status, 403);
+  assert.equal(patchResponse.json.error.code, 'forbidden');
+
+  // Külső admin nem kérhet rt-tokent privát hívásra
+  const rtResponse = await call(`v1/productions/${PRODUCTION_ID}/rt-tokens`, {
+    method: 'POST',
+    token: admin.accessToken,
+    body: { channelIds: [created.id] },
+  });
+  assert.equal(rtResponse.status, 200);
+  assert.equal(rtResponse.json.grants.length, 0, 'nem adhat ki tokent a privát szobára');
+
+  await call(`v1/productions/${PRODUCTION_ID}/calls/${created.id}`, {
+    method: 'DELETE', token: camera.accessToken,
+  });
+});
+
 test('magaddal nem hívható privát vonal', async () => {
   const admin = (await login(OPERATOR)).json;
   const response = await call(`v1/productions/${PRODUCTION_ID}/calls`, {
@@ -573,4 +610,49 @@ test('a párhuzamos hash-ek memóriaigénye korlátos', async () => {
   const growth = (peak - before) / 1024 / 1024;
   // Measured on this machine: 165 MB peak with the cap, 230 MB without.
   assert.ok(growth < 120, `a csúcs ${growth.toFixed(0)} MB-tal nőtt`);
+});
+
+// The cap above is only half the property. The other half is what the server
+// SAYS when it hits the cap, and that half had no test at all: the queue limit
+// is 128 and the burst above is 60, so the refusal path never ran here.
+//
+// Measured before the fix, with the queue forced to one waiter: of six
+// concurrent checks of a CORRECT password, four came back "wrong" — and at the
+// login endpoint each of those also spends one rate-limited attempt, so load
+// alone locks the real user out. Overload must answer 503, never 401.
+test('a megtelt hash-sor 503-at ad, nem "hibás jelszót"', async () => {
+  resetRateLimits();
+  const concurrency = process.env.PASSWORD_CONCURRENCY;
+  const waiting = process.env.PASSWORD_MAX_WAITING;
+  process.env.PASSWORD_CONCURRENCY = '1';
+  process.env.PASSWORD_MAX_WAITING = '1';
+
+  let responses;
+  try {
+    responses = await Promise.all(Array.from({ length: 8 }, () => login(OPERATOR)));
+  } finally {
+    if (concurrency === undefined) delete process.env.PASSWORD_CONCURRENCY;
+    else process.env.PASSWORD_CONCURRENCY = concurrency;
+    if (waiting === undefined) delete process.env.PASSWORD_MAX_WAITING;
+    else process.env.PASSWORD_MAX_WAITING = waiting;
+  }
+
+  const statuses = responses.map((r) => r.status);
+  assert.ok(
+    statuses.includes(503),
+    `a sornak meg kellett volna telnie, de a válaszok: ${statuses.join(', ')}`,
+  );
+  assert.ok(
+    !statuses.includes(401),
+    `helyes jelszóra egyetlen 401 sem mehet ki, a válaszok: ${statuses.join(', ')}`,
+  );
+  for (const response of responses) {
+    if (response.status !== 503) continue;
+    assert.equal(response.json.error.code, 'overloaded');
+  }
+
+  // And the account must still be usable: a 401 here would have burned
+  // rate-limit attempts, and enough of them return 429 instead of a session.
+  resetRateLimits();
+  assert.equal((await login(OPERATOR)).status, 200, 'a fiók a terhelés után is használható');
 });

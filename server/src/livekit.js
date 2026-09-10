@@ -137,3 +137,12 @@ export async function listParticipants(room) {
 export async function removeParticipant(room, identity) {
   await roomService().removeParticipant(room, identity);
 }
+
+export async function deleteRoom(room) {
+  try {
+    await roomService().deleteRoom(room);
+    return true;
+  } catch {
+    return false;
+  }
+}

@@ -22,14 +22,23 @@ enum InviteCode {
     /// link ending in the code.
     static func from(url: URL) -> String? {
         let candidate: String?
-        if url.scheme?.lowercased() == "flyabove-intercom" {
+        let scheme = url.scheme?.lowercased()
+        if scheme == "flyabove-intercom" {
             // Both invite/CODE and //invite/CODE shapes occur depending on how
             // the link was written.
             let parts = ([url.host] + url.pathComponents).compactMap { $0 }
                 .filter { $0 != "/" && $0.lowercased() != "invite" }
             candidate = parts.last
+        } else if scheme == "https" || scheme == "http" {
+            let parts = url.pathComponents.filter { $0 != "/" }
+            guard let inviteIndex = parts.firstIndex(where: { $0.lowercased() == "invite" }),
+                  inviteIndex + 1 < parts.count
+            else {
+                return nil
+            }
+            candidate = parts[inviteIndex + 1]
         } else {
-            candidate = url.pathComponents.last
+            return nil
         }
 
         guard let candidate else { return nil }

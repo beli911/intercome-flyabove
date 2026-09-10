@@ -105,19 +105,19 @@ final class KeychainTokenStore: TokenStoring {
 
     func save(_ tokens: AuthTokens) throws {
         let data = try JSONEncoder.intercom.encode(tokens)
-        let attributes: [String: Any] = [
+        let updateAttributes: [String: Any] = [
             kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         ]
 
-        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, attributes as CFDictionary)
+        let updateStatus = SecItemUpdate(baseQuery as CFDictionary, updateAttributes as CFDictionary)
         if updateStatus == errSecSuccess { return }
         guard updateStatus == errSecItemNotFound else {
             throw TokenStoreError.keychainFailure(updateStatus)
         }
 
         var insert = baseQuery
-        insert.merge(attributes) { _, new in new }
+        insert[kSecValueData as String] = data
+        insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         let addStatus = SecItemAdd(insert as CFDictionary, nil)
         guard addStatus == errSecSuccess else {
             throw TokenStoreError.keychainFailure(addStatus)

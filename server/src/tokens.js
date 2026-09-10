@@ -22,7 +22,11 @@ export function issueAccessToken(user) {
 
 export function verifyAccessToken(token) {
   try {
-    return jwt.verify(token, config.jwtSecret, { issuer: 'flycom', audience: 'flycom-app' });
+    return jwt.verify(token, config.jwtSecret, {
+      issuer: 'flycom',
+      audience: 'flycom-app',
+      algorithms: ['HS256'],
+    });
   } catch {
     return undefined;
   }
@@ -60,6 +64,7 @@ export function rotateRefreshToken({ token, deviceName }) {
 
   if (row.used_at) {
     db.revokeFamily(row.family_id);
+    db.endAllSessions(row.user_id);
     return { failure: RefreshFailure.reused };
   }
 
