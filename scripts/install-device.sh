@@ -99,6 +99,21 @@ if [ -z "$TEAM" ]; then
   TEAM=$(defaults read com.apple.dt.Xcode IDEProvisioningTeams 2>/dev/null \
     | grep -oE '"teamID" = "[^"]+"' | head -1 | cut -d'"' -f4 || true)
 fi
+# Tartalék: az aláíró tanúsítványból.
+#
+# A Team ID az `OU` mező — NEM a `find-identity` kiírásában zárójelben álló
+# érték, az a tanúsítványé. Ezt a projekt már egyszer megégette (2026-08-27), és
+# a tünet nem "hiányzik a csapat", hanem egy érvénytelen azonosítóval elhasaló
+# aláírás, ami sokkal nehezebben olvasható.
+if [ -z "$TEAM" ]; then
+  CERT_NAME=$(security find-identity -p codesigning -v 2>/dev/null \
+    | grep -m1 '"Apple Develop' | sed 's/.*"\(.*\)".*/\1/' || true)
+  if [ -n "$CERT_NAME" ]; then
+    TEAM=$(security find-certificate -c "$CERT_NAME" -p 2>/dev/null \
+      | openssl x509 -noout -subject 2>/dev/null \
+      | tr ',' '\n' | sed -n 's/.*OU=\([A-Z0-9]*\).*/\1/p' | head -1 || true)
+  fi
+fi
 
 echo "Eszköz: $DEVICE"
 echo "API:    $BASE_URL"
