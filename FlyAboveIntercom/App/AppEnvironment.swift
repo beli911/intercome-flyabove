@@ -42,6 +42,7 @@ final class AppEnvironment: ObservableObject {
     /// Set when `Info.plist` carries a base URL the app refuses to use.
     @Published private(set) var configurationFailure: String?
 
+    private var didBootstrap = false
     private var lastAppliedConfigVersion = 0
     private let api: (any IntercomAPI)?
     private let auth: AuthService?
@@ -92,6 +93,16 @@ final class AppEnvironment: ObservableObject {
 
     /// Called once at launch. Restores a Keychain session if there is one.
     func bootstrap() async {
+        // Övsömör a nadrágtartóhoz. A `.task` helyét megjavítottuk (a `Group`
+        // átlátszó, és minden gyerekére külön alkalmazta), de egy indítás, ami
+        // MÁSODSZOR is lefut, új `IntercomViewModel`-t hoz létre és lecseréli a
+        // már csatlakozott példányt — a kapcsolat elszakad, látszólag magától.
+        // Ezt a következményt nem szabad a nézet-réteg helyességére bízni.
+        guard !didBootstrap else {
+            FlycomDiagnostics.log("--- ismételt bootstrap eldobva (a munkamenet él) ---")
+            return
+        }
+        didBootstrap = true
         FlycomDiagnostics.logSessionStart()
         if let configurationFailure {
             phase = .unavailable(message: configurationFailure)
@@ -130,6 +141,8 @@ final class AppEnvironment: ObservableObject {
 
     /// Retry after a transient failure, without touching the stored session.
     func retryBootstrap() async {
+        // Az újrapróbálás SZÁNDÉKOS ismétlés, tehát feloldja a zárat.
+        didBootstrap = false
         phase = .launching
         await bootstrap()
     }

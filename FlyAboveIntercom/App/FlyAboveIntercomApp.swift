@@ -18,7 +18,14 @@ struct FlyAboveIntercomApp: App {
 
     var body: some Scene {
         WindowGroup {
-            Group {
+            // ZStack, nem csupasz Group: a `Group` ÁTLÁTSZÓ, és a rá tett
+            // módosítók MINDEN gyerekére külön érvényesek. A `.task` így minden
+            // fázis-váltásnál újra elindult (mérve: 9 `bootstrap()` egyetlen
+            // munkamenetben), és mivel a bootstrap új `IntercomViewModel`-t
+            // hoz létre, az LECSERÉLTE a már csatlakozott példányt — a kapcsolat
+            // elszakadt, látszólag magától.
+            ZStack {
+                Group {
                 switch environment.phase {
                 case .launching:
                     ProgressView("Indulás…")
@@ -54,6 +61,7 @@ struct FlyAboveIntercomApp: App {
                     } else {
                         ProgressView()
                     }
+                }
                 }
             }
             .task { await environment.bootstrap() }
