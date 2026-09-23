@@ -143,6 +143,37 @@ struct ProfileView: View {
             }
             .tint(DS.accent)
             .padding(12)
+
+            // Csak fejlesztői módban, és csak akkor, ha egyáltalán van
+            // háttérvonal: egy kapcsoló, aminek nincs mit kapcsolnia, csak
+            // félrevezet.
+            if viewModel.isDeveloperModeEnabled, viewModel.backgroundLine != nil {
+                Divider().overlay(DS.line.opacity(0.6))
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Hang-munkamenet")
+                        .font(DS.display(14, .regular))
+                        .foregroundStyle(DS.ink)
+                    Text("Melyik mód engedi ténylegesen megszólalni lezárt képernyőn — ezt csak valódi telefonon lehet eldönteni.")
+                        .font(DS.display(12, .regular))
+                        .foregroundStyle(DS.ink3)
+                    Picker("Hang-munkamenet", selection: $viewModel.audioSessionOwnership) {
+                        ForEach(AudioSessionOwnership.Mode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    // A szám mondja meg, hogy az átadás egyáltalán életbe
+                    // lépett-e. Enélkül a "nem működik" és a "nem is futott le"
+                    // megkülönböztethetetlen.
+                    Text("Kihagyott munkamenet-hívás: \(viewModel.suppressedAudioSessionCalls)")
+                        .font(DS.mono(11, .regular))
+                        .foregroundStyle(DS.ink3)
+                    Text("Váltás CSATLAKOZÁS ELŐTT — a médiaréteg indulás közben olvassa.")
+                        .font(DS.display(11, .regular))
+                        .foregroundStyle(DS.ink3)
+                }
+                .padding(12)
+            }
         }
     }
 

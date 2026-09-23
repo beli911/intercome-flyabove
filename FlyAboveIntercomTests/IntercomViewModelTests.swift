@@ -888,6 +888,76 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertNil(subject.backgroundLine)
     }
 
+    // MARK: - Audio session ownership
+
+    func testTheDefaultModeNeverSuppressesTheAudioSession() async {
+        let ptt = BackgroundTalkSpy()
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: audio,
+            backgroundTalk: ptt
+        )
+
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        await subject.disconnect()
+
+        // Ez a teherhordó állítás: a Push to Talk bekapcsolása önmagában nem
+        // változtat a ma működő hang-úton.
+        XCTAssertEqual(subject.suppressedAudioSessionCalls, 0)
+        let modes = await audio.activateRecordingModes()
+        XCTAssertEqual(modes, [false], "a csatlakozás ugyanúgy aktivál, mint eddig")
+    }
+
+    func testTheHandoverModeLeavesAHeldSessionAlone() async {
+        let ptt = BackgroundTalkSpy()
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: audio,
+            backgroundTalk: ptt
+        )
+        subject.audioSessionOwnership = .systemOwnsDuringPushToTalk
+
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+
+        // Beszéd egy tartott háttérvonalon: EZ az a pont, ahol az appnak nem
+        // szabad magának aktiválnia — a munkamenetet a rendszer adja át.
+        await subject.setTalking(true, channelID: line)
+
+        XCTAssertGreaterThan(
+            subject.suppressedAudioSessionCalls, 0,
+            "a kihagyásnak látszania kell — enélkül a 'nem működik' és a 'nem is futott le' megkülönböztethetetlen"
+        )
+        let modes = await audio.activateRecordingModes()
+        XCTAssertEqual(modes, [false], "felvételre nem mi aktiváltunk, hanem a rendszer adta volna át")
+    }
+
+    /// A bontás sorrendje szándékos, és ezt rögzíteni kell: előbb engedjük el a
+    /// vonalat, és onnantól a munkamenet megint a miénk — tehát a lezárás NEM
+    /// marad ki. Az első változatom ezt rosszul várta el; a teszt tévedett,
+    /// nem a kód.
+    func testDisconnectStillClosesTheSessionBecauseTheLineIsReleasedFirst() async {
+        let ptt = BackgroundTalkSpy()
+        let audio = AudioSessionSpy(permissionGranted: true)
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: audio,
+            backgroundTalk: ptt
+        )
+        subject.audioSessionOwnership = .systemOwnsDuringPushToTalk
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+
+        await subject.disconnect()
+
+        XCTAssertEqual(subject.suppressedAudioSessionCalls, 0)
+        XCTAssertNil(subject.backgroundLine)
+    }
+
     // MARK: - Helpers
 
     private func makeConnectedSubject() async -> (IntercomViewModel, TransportSpy, AudioSessionSpy) {

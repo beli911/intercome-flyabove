@@ -20,6 +20,24 @@ final class IntercomViewModel: ObservableObject {
     /// being discovered on a live set.
     @Published private(set) var backgroundLineWarning: String?
 
+    /// Ki kezelje az `AVAudioSession`-t. Alapból az app — tehát Push to Talk
+    /// nélkül minden pontosan úgy működik, ahogy eddig. A másik mód a
+    /// dokumentált átadás, amit **csak fizikai telefonon lehet eldönteni**,
+    /// ezért váltható, nem bedrótozott.
+    @Published var audioSessionOwnership: AudioSessionOwnership.Mode = .appOwns {
+        didSet {
+            guard oldValue != audioSessionOwnership else { return }
+            let external = AudioSessionOwnership
+                .shouldDisableLiveKitAutomaticConfiguration(mode: audioSessionOwnership)
+            Task { [transport] in await transport.setAudioSessionManagedExternally(external) }
+        }
+    }
+    /// Hányszor NEM nyúltunk a munkamenethez, mert a rendszeré volt. Ez a szám
+    /// mondja meg egy eszközös próbán, hogy az átadás egyáltalán életbe
+    /// lépett-e — enélkül a „nem működik” és a „nem is futott le”
+    /// megkülönböztethetetlen.
+    @Published private(set) var suppressedAudioSessionCalls = 0
+
     /// Shows the RTT/bitrate overlay. Debug builds opt in by default.
     @Published var isDeveloperModeEnabled: Bool
     /// Momentary by default: a microphone that needs holding cannot be left
@@ -244,7 +262,7 @@ final class IntercomViewModel: ObservableObject {
             // listen-only operator out of the show over a permission they never
             // use, and would collect access we may never need. The prompt comes
             // on the first Talk instead.
-            try await audioSession.activate(recording: false)
+            try await activateSessionIfOurs(recording: false)
             audioRouteName = await audioSession.currentOutputName()
             try await transport.connect(configuration: configuration)
             connectionState = .connected
@@ -256,7 +274,7 @@ final class IntercomViewModel: ObservableObject {
             await updateDucking()
             await refreshBackgroundLine()
         } catch {
-            await audioSession.deactivate()
+            await deactivateSessionIfOurs()
             fail(with: error)
         }
     }
@@ -269,7 +287,7 @@ final class IntercomViewModel: ObservableObject {
         await releaseBackgroundLine()
         await stopTalkingEverywhere()
         await transport.disconnect()
-        await audioSession.deactivate()
+        await deactivateSessionIfOurs()
         desiredTalk.removeAll()
         appliedTalk.removeAll()
         statistics = nil
@@ -409,7 +427,7 @@ final class IntercomViewModel: ObservableObject {
             configuration.channels[index].isTalking = false
         }
         await transport.disconnect()
-        await audioSession.deactivate()
+        await deactivateSessionIfOurs()
         connectionState = .disconnected
     }
 
@@ -482,7 +500,7 @@ final class IntercomViewModel: ObservableObject {
                 // would arm a microphone for a session that no longer exists.
                 guard let self, self.sessionGeneration == generation else { return .abandoned }
                 do {
-                    try await audioSession.activate(recording: true)
+                    try await activateSessionIfOurs(recording: true)
                 } catch {
                     let message = (error as? LocalizedError)?.errorDescription
                         ?? error.localizedDescription
@@ -701,7 +719,7 @@ final class IntercomViewModel: ObservableObject {
             // Talk is momentary, so the finger has long left the button: restore
             // the session at the level the user is actually using.
             let isTalking = desiredTalk.values.contains(true) && isMicrophoneGranted == true
-            try? await audioSession.activate(recording: isTalking)
+            try? await activateSessionIfOurs(recording: isTalking)
 
         case let .routeChanged(reason, outputName):
             if outputName != audioRouteName {
@@ -770,6 +788,34 @@ final class IntercomViewModel: ObservableObject {
         if channelIDs.contains(where: { (appliedTalk[$0] ?? .off) != .off }) {
             await forceDisconnectForUnstoppableMicrophone()
         }
+    }
+
+    /// Aktiválja a munkamenetet, ha az most a miénk.
+    ///
+    /// A kihagyás nem néma: számlálót léptet és naplóz. Egy csendes no-op
+    /// pontosan az a hibaosztály, ami ellen ez az egész készült.
+    private func activateSessionIfOurs(recording: Bool) async throws {
+        guard AudioSessionOwnership.mayAppActivate(
+            mode: audioSessionOwnership,
+            isBackgroundLineHeld: backgroundLine?.channelID != nil
+        ) else {
+            suppressedAudioSessionCalls += 1
+            events.record(.audioSessionHandedOver, detail: "aktiválás kihagyva")
+            return
+        }
+        try await audioSession.activate(recording: recording)
+    }
+
+    private func deactivateSessionIfOurs() async {
+        guard AudioSessionOwnership.mayAppDeactivate(
+            mode: audioSessionOwnership,
+            isBackgroundLineHeld: backgroundLine?.channelID != nil
+        ) else {
+            suppressedAudioSessionCalls += 1
+            events.record(.audioSessionHandedOver, detail: "lezárás kihagyva")
+            return
+        }
+        await audioSession.deactivate()
     }
 
     // MARK: - Background line

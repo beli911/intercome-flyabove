@@ -55,6 +55,12 @@ protocol IntercomTransport: Sendable {
     /// Momentary multiplier applied on top of the operator's level. Kept
     /// separate so a duck can end without having to remember what the level was.
     func setDucking(_ multiplier: Double, channelID: UUID) async throws
+
+    /// Kimondja a médiarétegnek, hogy az `AVAudioSession`-t más kezeli.
+    ///
+    /// Alapértelmezetten nem csinál semmit: csak a valódi LiveKit-átvitelnek
+    /// van mit kikapcsolnia, az előnézeti átvitelnek és a teszt-álcáknak nincs.
+    func setAudioSessionManagedExternally(_ externally: Bool) async
     /// Long-lived stream of transport-originated updates. Called once per
     /// connection lifetime by the view model.
     ///
@@ -85,4 +91,10 @@ enum IntercomTransportError: LocalizedError {
 
         }
     }
+}
+
+
+extension IntercomTransport {
+    /// Aki nem nyúl a hang-munkamenethez, annak nincs mit elengednie.
+    func setAudioSessionManagedExternally(_: Bool) async {}
 }

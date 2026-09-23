@@ -207,6 +207,18 @@ actor LiveKitIntercomTransport: IntercomTransport {
         applyVolume(channelID: channelID)
     }
 
+    /// A SDK saját doksija (`Docs/audio.md`) ezt írja elő a CallKit-jellegű,
+    /// magától konfiguráló keretrendszerekhez — a Push to Talk ugyanez az
+    /// osztály: kikapcsolva „the SDK does not touch the audio session”.
+    ///
+    /// ⚠️ Ugyanaz a doksi azt is mondja, hogy ezt indulás közben, egyszer kell
+    /// beállítani, és nem menet közben változtatni. Azért van mégis futásidejű,
+    /// mert a két mód közötti választást **csak fizikai telefonon lehet
+    /// eldönteni** — a váltás szobához csatlakozás ELŐTT történjen.
+    func setAudioSessionManagedExternally(_ externally: Bool) async {
+        AudioManager.shared.audioSession.isAutomaticConfigurationEnabled = !externally
+    }
+
     func setDucking(_ multiplier: Double, channelID: UUID) async throws {
         guard duckMultipliers[channelID] != multiplier else { return }
         duckMultipliers[channelID] = multiplier
