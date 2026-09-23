@@ -182,3 +182,85 @@ Strukturált JSON sorok. A `docs/SECURITY.md` tiltja a hang, a tokenek, a
 TURN-hitelesítők és a hosszú távú IP-megőrzés naplózását — a redakció a
 `src/log.js`-ben, központilag történik, mert egy tetszőleges objektumot fogadó
 naplózónak előbb-utóbb valaki sietve átad egy tokent.
+
+---
+
+## Éles üzembe helyezés (Docker)
+
+A terepi használat — telefonok különböző mobilhálózatokról — három dolgot
+követel meg, amit a fejlesztői futtatás nem: **TLS**, **TURN-relé**, és hogy a
+folyamat magától visszajöjjön.
+
+### Fájlok
+
+| Fájl | Mit csinál |
+|---|---|
+| `server/Dockerfile` | az API konténere (Alpine, nem-root felhasználó) |
+| `deployment/docker-compose.yml` | Caddy + API, `restart: always`, névvel ellátott kötetek |
+| `deployment/Caddyfile` | TLS-termináció, automatikus Let's Encrypt |
+| `deployment/env.production.example` | a kötelező környezeti változók, magyarázattal |
+| `scripts/verify-production-stack.sh` | deploy UTÁN megméri, hogy tényleg áll-e |
+
+### Menete
+
+```sh
+cd deployment
+cp env.production.example .env      # és töltsd ki
+docker compose up -d --build
+../scripts/verify-production-stack.sh --domain api.intercom.flyabove.hu
+```
+
+### A négy kötelező változó — és hogy miért pont ez a négy
+
+Nem másolat: az `assertConfigured()` mind a négyet megköveteli, és hiányukban
+**megnevezett okkal megtagadja az indulást**. Mérve (2026-09-23), külön
+kontrollal mindegyikre:
+
+| Változó | Ha hiányzik / rossz |
+|---|---|
+| `JWT_SECRET` | „JWT_SECRET hiányzik”, illetve „rövidebb 32 karakternél” |
+| `LIVEKIT_URL` | „LIVEKIT_URL hiányzik”; `ws://`-re: „nem wss:// — élesben a médiajelzésnek titkosítottnak kell lennie” |
+| `LIVEKIT_API_KEY` | „LIVEKIT_API_KEY hiányzik” |
+| `LIVEKIT_API_SECRET` | „LIVEKIT_API_SECRET hiányzik” |
+
+A szerver tehát nem indul el félkészen — ez szándékos, és ezért nincs a
+compose-ban egyetlen olyan változó sem, amit ne olvasna valami.
+
+### 🔴 A TURN, amit a TLS nem vált ki
+
+Mobilhálózaton (Telekom/Yettel/Vodafone) a telefonok **szimmetrikus NAT** mögött
+vannak: nem látnak rá egymásra, tehát a közvetlen WebRTC-út nem épül fel. A
+STUN ehhez kevés — **relé kell**.
+
+- **LiveKit Cloud:** a TURN benne van, nincs vele üzemeltetési teendő.
+- **Saját `livekit-server`:** mérve az 1.13.6-os binárison, **van beépített
+  TURN-je** (`--turn-cert` / `--turn-key`) — tehát **külön `coturn` NEM kell**.
+  Cserébe a TURN tanúsítványa és a 3478/5349 portok a te dolgod.
+
+⛔ **Ezt egyik ellenőrzés sem tudja helyetted eldönteni:** hogy a hang átjön-e
+mobilhálózaton, **kizárólag két valódi telefon mondja meg, két külön
+szolgáltatón**. A `verify-production-stack.sh` ezt ki is mondja, ahelyett hogy
+zölddel elfedné.
+
+### Adatmentés
+
+Az SQLite WAL módban fut (`db.js`), és az adat névvel ellátott köteten él, tehát
+egy újraindítást túlél. Ez **nem mentés**. Konzisztens másolat futó szerver
+mellett:
+
+```sh
+docker compose exec flycom-api \
+  node -e "require('better-sqlite3')('/var/lib/flycom/flycom.db').backup('/var/lib/flycom/flycom-backup.db')"
+```
+
+⚠️ A másolat ugyanazon a köteten ül, tehát **lemez-szintű hibára nem véd** — a
+gépen kívülre is el kell vinni.
+
+### ⛔ Amit ezen a gépen NEM lehetett lemérni
+
+**Ezen a Macen nincs Docker**, tehát a kép **soha nem épült meg**, és a stack
+**soha nem futott**. A Dockerfile, a compose és a Caddyfile helyessége az első
+`docker compose up`-nál derül ki. Amit viszont MÉRTÜNK: a konfigurációs
+követelményeket (fent), a compose YAML-jét, és az ellenőrző szkriptet — utóbbit
+kétszer, a helyi stacken és egy valódi HTTPS-hoszton, hogy a TLS-ág is
+bizonyítottan fusson.

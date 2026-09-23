@@ -1,0 +1,60 @@
+# Flycom — éles stack.
+#
+# Két doboz: a Caddy adja a TLS-t kívül, a Node API fut belül. A médiát a
+# LiveKit viszi, ami SZÁNDÉKOSAN nincs ebben a fájlban — lásd a
+# környezeti-változó sablont (deployment/env.production.example).
+#
+# A `version:` kulcs szándékosan hiányzik: a mai Docker Compose elavultnak
+# jelzi, és semmit nem befolyásol.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # A Caddyfile ezt olvassa; enélkül a tanúsítvány a rossz névre szólna.
+      FLYCOM_API_DOMAIN: ${FLYCOM_API_DOMAIN:?a FLYCOM_API_DOMAIN kotelezo}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # A megszerzett tanúsítvány ide kerül. Kötet nélkül minden újraindítás új
+      # tanúsítványt kérne, és a Let's Encrypt heti korlátja kizárná a domaint.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - flycom-api
+
+  flycom-api:
+    build:
+      context: ../server
+      dockerfile: Dockerfile
+    restart: always
+    # Nincs `ports:` — az API kizárólag a Caddyn át érhető el. Egy kipublikált
+    # 8080 megkerülné a TLS-t, és a titkosítatlan út működne is, csendben.
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      # A szerver élesben alapból 127.0.0.1-re kötne (helyesen: egy TLS-proxy
+      # mögötti folyamat proxy nélkül is elérhető lenne). Konténerben viszont a
+      # Caddy egy MÁSIK hálózati névtérből hív, ezért itt 0.0.0.0 kell — és ez
+      # biztonságos, mert a port nincs kipublikálva.
+      HOST: 0.0.0.0
+      # A rate limit a hívó címére szól. Enélkül a proxy címét számolná, és
+      # egyetlen rossz jelszó az EGÉSZ stábot kizárná a bejelentkezésből.
+      TRUST_PROXY: "1"
+      DATABASE_PATH: /var/lib/flycom/flycom.db
+      # Mind a négy KÖTELEZŐ élesben — mérve: hiányuknál a szerver megnevezett
+      # okkal megtagadja az indulást, nem indul el félkészen.
+      JWT_SECRET: ${JWT_SECRET:?a JWT_SECRET kotelezo, legalabb 32 karakter}
+      LIVEKIT_URL: ${LIVEKIT_URL:?a LIVEKIT_URL kotelezo, wss:// kell legyen}
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY:?a LIVEKIT_API_KEY kotelezo}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?a LIVEKIT_API_SECRET kotelezo}
+    volumes:
+      - flycom_db:/var/lib/flycom
+
+volumes:
+  caddy_data:
+  caddy_config:
+  flycom_db:
