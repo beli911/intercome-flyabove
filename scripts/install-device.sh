@@ -137,6 +137,7 @@ xcodebuild build \
   -configuration "$CONFIGURATION" \
   -derivedDataPath "$DERIVED" \
   -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
   FLYABOVE_API_BASE_URL="$BASE_URL" \
   ${TEAM:+FLYABOVE_DEVELOPMENT_TEAM="$TEAM"}
 
