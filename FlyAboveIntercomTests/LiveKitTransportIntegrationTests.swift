@@ -1,3 +1,4 @@
+import AVFAudio
 import LiveKit
 import XCTest
 @testable import FlyAboveIntercom
@@ -10,9 +11,21 @@ import XCTest
 /// `xcodebuild test` on a machine without it still passes. To run it:
 ///
 ///     livekit-server --dev --bind 0.0.0.0
-///     cd dev-server && npm start
+///     cd server && npm run dev
 ///
-/// See `dev-server/README.md`.
+/// ⚠️ `npm run dev`, not `npm start`: the demo accounts these tests log in with
+/// are seeded by `SEED_DEMO=1`. Both modes show up in `ps` as the same command
+/// line, so a server started the wrong way looks identical and fails every test
+/// with `unauthorized`.
+///
+/// The third precondition is the one that cost a whole round to find. The three
+/// tests that open a real microphone need the simulator to have granted the
+/// permission — otherwise LiveKit fails with
+/// `Unknown(Microphone permission is not granted)`:
+///
+///     xcrun simctl privacy <device> grant microphone hu.flyabove.intercom
+///
+/// See `server/README.md`.
 final class LiveKitTransportIntegrationTests: XCTestCase {
     private static let baseURL = URL(string: "http://127.0.0.1:8080/")!
 
@@ -99,6 +112,7 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     // MARK: - Media
 
     func testTransportConnectsJoinsRoomAndPublishesOnTalk() async throws {
+        try skipUnlessMicrophoneIsGranted()
         let configuration = try await liveConfiguration(email: "operator@flyabove.hu")
         let transport = LiveKitIntercomTransport(api: api, auth: auth)
         let collector = EventCollector(stream: await transport.events())
@@ -115,7 +129,12 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
             }
         } catch is IntegrationTimeout {
             await transport.disconnect()
-            throw XCTSkip("A mikrofon publikálása nem fejeződött be — a szimulátornak nincs valódi felvevő eszköze. Futtasd fizikai iPhone-on.")
+            // Measured 2026-09-23: the old wording here claimed the simulator
+            // has no recording device. That is false — with the microphone
+            // permission granted this test passes on a simulator. A skip that
+            // states a wrong cause is worse than no skip: it teaches the next
+            // reader to stop looking.
+            throw XCTSkip("A mikrofon publikálása nem fejeződött be időben. Ellenőrizd a mikrofon-engedélyt (lásd az osztály fejlécét), és ha megvan, futtasd fizikai iPhone-on.")
         }
 
         await transport.disconnect()
@@ -254,6 +273,7 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     /// anyway — the way a modified or hostile build would. The server has to be
     /// the thing that refuses.
     func testServerRefusesPublishEvenWhenTheClientIgnoresTheGrant() async throws {
+        try skipUnlessMicrophoneIsGranted()
         try await auth.login(email: "kamera@flyabove.hu", password: "flyabove")
         let accessToken = try await auth.validAccessToken()
         let productions = try await api.productions(accessToken: accessToken)
@@ -305,6 +325,7 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
     /// room, which unpublishes the track — and this test watches for exactly
     /// that, from the server's own view of the room rather than the client's.
     func testRevokingTalkStopsAPublishingClientServerSide() async throws {
+        try skipUnlessMicrophoneIsGranted()
         // A separate auth session for the admin, so revoking rights does not
         // disturb the session that is publishing.
         let adminAuth = AuthService(
@@ -743,6 +764,27 @@ final class LiveKitTransportIntegrationTests: XCTestCase {
             try? await Task.sleep(for: .seconds(interval))
         }
         return await condition()
+    }
+
+    /// Refuses to pretend a missing permission is a failing product.
+    ///
+    /// Without it LiveKit reports `Unknown(Microphone permission is not
+    /// granted)`, which reads like a transport bug and sent a whole round of
+    /// investigation the wrong way. Named here so the next reader gets the
+    /// command instead of the symptom.
+    private func skipUnlessMicrophoneIsGranted(
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        guard AVAudioApplication.shared.recordPermission != .granted else { return }
+        throw XCTSkip(
+            """
+            Nincs mikrofon-engedély, ezért ez a teszt nem tud mérni. Add meg:
+              xcrun simctl privacy <device> grant microphone hu.flyabove.intercom
+            """,
+            file: file,
+            line: line
+        )
     }
 
     private func withDeadline(
