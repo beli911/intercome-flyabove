@@ -840,7 +840,7 @@ final class IntercomViewModel: ObservableObject {
         )
         guard selection != backgroundLine else { return }
         backgroundLine = selection
-        print("[Flycom][hattervonal] alap=\(selection.basis) csatorna=\(selection.channelID.flatMap(channelName) ?? "nincs") elveszett=\(String(describing: selection.lostOperatorChoice))")
+        FlycomDiagnostics.log("[hattervonal] alap=\(selection.basis) csatorna=\(selection.channelID.flatMap(channelName) ?? "nincs") elveszett=\(String(describing: selection.lostOperatorChoice))")
 
         if let lost = selection.lostOperatorChoice {
             // The operator's pick is kept, not cleared: if the server grants

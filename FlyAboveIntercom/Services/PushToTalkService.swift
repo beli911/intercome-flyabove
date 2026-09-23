@@ -128,7 +128,7 @@ final class PushToTalkService: NSObject, BackgroundTalkControlling {
         // `--console` figyelő gyakorlatilag vak volt. Ez a sor a stdout-ra megy,
         // tehát látszik. És azért marad Release-ben is, mert egy diagnosztika,
         // ami pont a terepi buildből tűnik el, akkor hiányzik, amikor kell.
-        print("[Flycom][PTT] \(event)")
+        FlycomDiagnostics.log("[PTT] \(event)")
         for continuation in continuations.values { continuation.yield(event) }
     }
 }

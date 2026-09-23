@@ -92,6 +92,7 @@ final class AppEnvironment: ObservableObject {
 
     /// Called once at launch. Restores a Keychain session if there is one.
     func bootstrap() async {
+        FlycomDiagnostics.logSessionStart()
         if let configurationFailure {
             phase = .unavailable(message: configurationFailure)
             return
