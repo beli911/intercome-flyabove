@@ -286,7 +286,10 @@ final class AppEnvironment: ObservableObject {
         let viewModel = IntercomViewModel(
             configuration: configuration,
             transport: LiveKitIntercomTransport(api: api, auth: auth),
-            audioSession: audioSession
+            audioSession: audioSession,
+            // Only on the real transport: a preview session must not take a
+            // system line the operator would then see on their lock screen.
+            backgroundTalk: PushToTalkService()
         )
         // The view model does not fetch; it applies. Fetching lives here,
         // where the API does.

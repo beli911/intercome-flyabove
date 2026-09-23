@@ -34,6 +34,8 @@ final class EventLog: ObservableObject {
         case privateCallStarted
         case privateCallEnded
         case failsafeDisconnect
+        case backgroundLineHeld
+        case backgroundLineLost
         /// The server sent something this client cannot act on. Recorded rather
         /// than trapped: a malformed response should be diagnosable, not fatal.
         case invalidServerResponse
@@ -51,6 +53,8 @@ final class EventLog: ObservableObject {
             case .routeChanged: "HANGÚTVONAL VÁLTÁS"
             case .mediaServicesReset: "HANGSZOLGÁLTATÁS ÚJRAINDULT"
             case .configurationChanged: "KONFIGURÁCIÓ FRISSÜLT"
+            case .backgroundLineHeld: "HÁTTÉRVONAL ÉL"
+            case .backgroundLineLost: "HÁTTÉRVONAL MEGSZŰNT"
             case .privateCallStarted: "PRIVÁT HÍVÁS INDULT"
             case .privateCallEnded: "PRIVÁT HÍVÁS VÉGE"
             case .failsafeDisconnect: "BIZTONSÁGI BONTÁS"

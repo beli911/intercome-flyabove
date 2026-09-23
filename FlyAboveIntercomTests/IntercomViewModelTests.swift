@@ -718,6 +718,176 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertFalse(subject.configuration.channels[0].isListening)
     }
 
+    // MARK: - Background line (Push to Talk)
+
+    func testConnectingHandsOneLineToTheSystem() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+
+        await subject.connect()
+
+        await waitUntil { ptt.joined.count == 1 }
+        // The demo desk has no director line, so the first line the operator is
+        // already listening to is the one that survives a locked screen.
+        XCTAssertEqual(ptt.joined.first?.name, "Mindenki")
+        XCTAssertEqual(subject.backgroundLine?.basis, .listenedLine)
+    }
+
+    func testDisconnectingGivesTheLineBack() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+
+        await subject.disconnect()
+
+        // A Push to Talk control left on the lock screen of a phone that is no
+        // longer connected would invite an operator to talk into nothing.
+        XCTAssertEqual(ptt.leaveCount, 1)
+        XCTAssertNil(subject.backgroundLine)
+    }
+
+    func testSystemTransmissionOpensAndClosesTheLine() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+
+        await ptt.emit(.beganTransmitting(channelID: line, fromAccessoryButton: true))
+        await waitUntil { subject.activeTalkChannelCount == 1 }
+
+        await ptt.emit(.endedTransmitting(channelID: line))
+        await waitUntil { subject.activeTalkChannelCount == 0 }
+    }
+
+    func testTheSystemHeldLineSurvivesLeavingTheForeground() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+        let other = try! XCTUnwrap(subject.configuration.channels.first { $0.id != line }?.id)
+
+        // One line opened by the system, one opened in the app.
+        await ptt.emit(.beganTransmitting(channelID: line, fromAccessoryButton: true))
+        await waitUntil { subject.activeTalkChannelCount == 1 }
+        await subject.setTalking(true, channelID: other)
+        XCTAssertEqual(subject.activeTalkChannelCount, 2)
+
+        await subject.handleSceneActivation(isActive: false)
+
+        // Exactly the point of the feature: the pocket keeps the system-held
+        // line, and only the line with no visible stop control is closed.
+        XCTAssertEqual(subject.activeTalkChannelCount, 1)
+        XCTAssertTrue(subject.configuration.channels.first { $0.id == line }?.isTalking == true)
+        XCTAssertTrue(subject.configuration.channels.first { $0.id == other }?.isTalking == false)
+        XCTAssertEqual(subject.connectionState, .connected, "a fail-safe nem sülhet el a működő funkcióra")
+    }
+
+    func testAnAppOpenedBackgroundLineIsStillClosedOnLeavingTheForeground() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+
+        // Opened in the app, not by the system: nothing on a background screen
+        // can close it, so the old rule still applies.
+        await subject.setTalking(true, channelID: line)
+        await subject.handleSceneActivation(isActive: false)
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+    }
+
+    func testWithoutPushToTalkNothingChanges() async {
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true)
+        )
+        await subject.connect()
+        let line = try! XCTUnwrap(subject.configuration.channels.first?.id)
+        await subject.setTalking(true, channelID: line)
+
+        await subject.handleSceneActivation(isActive: false)
+
+        XCTAssertEqual(subject.activeTalkChannelCount, 0)
+        XCTAssertNil(subject.backgroundLine)
+    }
+
+    func testARefusedBackgroundLineIsSaidOutLoud() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+
+        await ptt.emit(.unavailable(reason: "Nincs jogosultság."))
+
+        // Silence here is the whole failure mode: the operator would believe the
+        // pocket works until the moment they needed it.
+        await waitUntil { subject.backgroundLineWarning == "Nincs jogosultság." }
+    }
+
+    func testABuildWithoutThePushToTalkCapabilityDoesNotWarn() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+
+        await ptt.emit(.unsupported(reason: "Nincs entitlement."))
+
+        // A capability the operator was never given is not a malfunction.
+        // Warning on every launch would teach them to ignore the warnings that
+        // do matter.
+        await waitUntil { subject.backgroundLine == nil }
+        XCTAssertNil(subject.backgroundLineWarning)
+    }
+
+    func testTheSystemTakingTheLineAwayIsSaidOutLoud() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+
+        await ptt.emit(.left(channelID: line, wasOurDecision: false))
+
+        await waitUntil { subject.backgroundLineWarning != nil }
+        XCTAssertNil(subject.backgroundLine)
+    }
+
     // MARK: - Helpers
 
     private func makeConnectedSubject() async -> (IntercomViewModel, TransportSpy, AudioSessionSpy) {
@@ -762,6 +932,48 @@ final class IntercomViewModelTests: XCTestCase {
 }
 
 // MARK: - Doubles
+
+/// Stands in for the system's Push to Talk service, which cannot run in a
+/// simulator. Everything it records is a request the real service would have
+/// received; everything `emit` pushes is a callback it would have made.
+@MainActor
+private final class BackgroundTalkSpy: BackgroundTalkControlling {
+    struct Join: Equatable {
+        let channelID: UUID
+        let name: String
+    }
+
+    var isSupported = true
+    private(set) var joined: [Join] = []
+    private(set) var leaveCount = 0
+    private(set) var transmitRequests: [Bool] = []
+    private var continuation: AsyncStream<BackgroundTalkEvent>.Continuation?
+
+    func prepare() async {}
+
+    func join(channelID: UUID, name: String) async {
+        joined.append(Join(channelID: channelID, name: name))
+    }
+
+    func leave() async { leaveCount += 1 }
+
+    func setTransmitting(_ transmitting: Bool) { transmitRequests.append(transmitting) }
+
+    func events() -> AsyncStream<BackgroundTalkEvent> {
+        AsyncStream { self.continuation = $0 }
+    }
+
+    /// Waits for the view model's observing task to have asked for the stream.
+    /// Yielding before that point would drop the event on the floor and the test
+    /// would fail for a reason that has nothing to do with the code.
+    func emit(_ event: BackgroundTalkEvent) async {
+        let deadline = Date().addingTimeInterval(2)
+        while continuation == nil, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        continuation?.yield(event)
+    }
+}
 
 private actor TransportSpy: IntercomTransport {
     struct TalkCall: Equatable {

@@ -206,6 +206,18 @@ struct RootView: View {
                 VStack(spacing: 8) {
                     if isDemoMode { DemoModeBanner() }
                     if viewModel.isMicrophoneGranted == false { MicrophoneDeniedBanner() }
+                    // Which line answers a locked screen is not something the
+                    // operator can work out from anything else on this display,
+                    // and pressing a hardware button without knowing is how you
+                    // talk to the wrong room.
+                    if let name = viewModel.backgroundLineName {
+                        BackgroundLineBanner(name: name)
+                    }
+                    if let warning = viewModel.backgroundLineWarning {
+                        BackgroundLineWarningBanner(text: warning) {
+                            viewModel.dismissBackgroundLineWarning()
+                        }
+                    }
 
                     ForEach(viewModel.configuration.channels) { channel in
                         ChannelRow(
@@ -369,6 +381,31 @@ private struct MicrophoneDeniedBanner: View {
             color: DS.live,
             rule: DS.live
         )
+    }
+}
+
+private struct BackgroundLineBanner: View {
+    let name: String
+
+    var body: some View {
+        BannerStrip(
+            text: "HÁTTÉRVONAL · LEZÁRT KÉPERNYŐN IS: \(name)",
+            color: DS.accentText,
+            rule: DS.accent
+        )
+    }
+}
+
+private struct BackgroundLineWarningBanner: View {
+    let text: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        Button(action: onDismiss) {
+            BannerStrip(text: text, color: DS.live, rule: DS.live)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("Koppints az üzenet eltüntetéséhez.")
     }
 }
 

@@ -12,6 +12,14 @@ final class IntercomViewModel: ObservableObject {
     @Published private(set) var isMicrophoneGranted: Bool?
     @Published var errorMessage: String?
 
+    /// The one line the system can hold open behind a locked screen, and why it
+    /// is that one. Nil on a build without Push to Talk.
+    @Published private(set) var backgroundLine: BackgroundTalkLine.Selection?
+    /// The background line is the feature an operator cannot see working. Every
+    /// refusal and every silent move of it ends up here, in words, rather than
+    /// being discovered on a live set.
+    @Published private(set) var backgroundLineWarning: String?
+
     /// Shows the RTT/bitrate overlay. Debug builds opt in by default.
     @Published var isDeveloperModeEnabled: Bool
     /// Momentary by default: a microphone that needs holding cannot be left
@@ -39,6 +47,16 @@ final class IntercomViewModel: ObservableObject {
     let events: EventLog
     private let transport: any IntercomTransport
     private let audioSession: any AudioSessionControlling
+    /// Nil on a build without Push to Talk. With it nil, everything below
+    /// behaves exactly as it did before this existed — which is asserted, not
+    /// assumed.
+    private let backgroundTalk: (any BackgroundTalkControlling)?
+    /// True only while the *system* is holding the microphone open for the
+    /// background line. This is what makes the background exemption safe: the
+    /// system's own stop control is on screen whenever it is true.
+    private var isSystemTransmitting = false
+    /// The operator's explicit pick, if they made one.
+    private var operatorBackgroundChoice: UUID?
     /// Called when the server says our configuration is stale. The view model
     /// does not fetch: whoever owns the API sets this and hands back the fresh
     /// channel list.
@@ -85,12 +103,14 @@ final class IntercomViewModel: ObservableObject {
         configuration: IntercomConfiguration = .demo,
         transport: any IntercomTransport,
         audioSession: any AudioSessionControlling,
+        backgroundTalk: (any BackgroundTalkControlling)? = nil,
         events: EventLog = EventLog(),
         isDeveloperModeEnabled: Bool = IntercomViewModel.defaultDeveloperMode
     ) {
         self.configuration = configuration
         self.transport = transport
         self.audioSession = audioSession
+        self.backgroundTalk = backgroundTalk
         self.events = events
         self.isDeveloperModeEnabled = isDeveloperModeEnabled
         startObserving()
@@ -138,7 +158,12 @@ final class IntercomViewModel: ObservableObject {
     /// screen.
     func handleSceneActivation(isActive: Bool) async {
         guard !isActive else { return }
-        await stopTalkingEverywhere()
+        let toSilence = BackgroundTalkLine.channelsToSilenceOnLeavingForeground(
+            talking: openTalkChannelIDs,
+            backgroundLine: backgroundLine?.channelID,
+            isSystemTransmitting: isSystemTransmitting
+        )
+        await stopTalking(on: toSilence)
     }
 
     /// Per-channel playout gain. Unity is 1.0; the UI offers roughly -∞ to +6 dB.
@@ -229,6 +254,7 @@ final class IntercomViewModel: ObservableObject {
             // A programme feed must be at the right level from the first
             // moment, not from the first time somebody speaks.
             await updateDucking()
+            await refreshBackgroundLine()
         } catch {
             await audioSession.deactivate()
             fail(with: error)
@@ -237,6 +263,10 @@ final class IntercomViewModel: ObservableObject {
 
     func disconnect() async {
         sessionGeneration += 1
+        // Before the talk teardown: a system line left held after the session is
+        // gone would put a live-looking Push to Talk control on the lock screen
+        // of a phone that is no longer connected to anything.
+        await releaseBackgroundLine()
         await stopTalkingEverywhere()
         await transport.disconnect()
         await audioSession.deactivate()
@@ -504,6 +534,15 @@ final class IntercomViewModel: ObservableObject {
                 await self.apply(event)
             }
         })
+
+        if let backgroundTalk {
+            observationTasks.append(Task { [weak self] in
+                for await event in backgroundTalk.events() {
+                    guard let self else { return }
+                    await self.apply(event)
+                }
+            })
+        }
     }
 
     private func apply(_ event: IntercomTransportEvent) {
@@ -640,6 +679,9 @@ final class IntercomViewModel: ObservableObject {
 
         // Roles may have changed with the configuration.
         await updateDucking()
+        // So may the background line: the server can revoke talk on exactly the
+        // line the operator was relying on from their pocket.
+        await refreshBackgroundLine()
 
         if !removed.isEmpty || descriptors.count != merged.count {
             errorMessage = nil
@@ -689,6 +731,169 @@ final class IntercomViewModel: ObservableObject {
 
     private func channelIndex(for id: UUID) -> Int? {
         configuration.channels.firstIndex(where: { $0.id == id })
+    }
+
+    /// Every line whose microphone is open or on its way open.
+    private var openTalkChannelIDs: [UUID] {
+        configuration.channels
+            .filter { $0.isTalking || desiredTalk[$0.id] == true }
+            .map(\.id)
+    }
+
+    /// Closes some of the open microphones rather than all of them.
+    ///
+    /// When nothing is exempt this hands straight over to
+    /// `stopTalkingEverywhere`, so the path the app has always taken is
+    /// literally the same code. The subset branch exists for exactly one case: a
+    /// background line the system is holding open with its own stop control on
+    /// screen.
+    private func stopTalking(on channelIDs: [UUID]) async {
+        let exempt = openTalkChannelIDs.filter { !channelIDs.contains($0) }
+        guard !exempt.isEmpty else {
+            await stopTalkingEverywhere()
+            return
+        }
+
+        for id in channelIDs {
+            desiredTalk[id] = false
+            if let index = channelIndex(for: id) {
+                configuration.channels[index].isTalking = false
+            }
+            startTalkWorker(channelID: id)
+        }
+        await waitForTalkWorkToSettle()
+
+        // Judged only on the lines we actually tried to close. Reading the
+        // deliberately-open background line as a stuck microphone would drop the
+        // session every time an operator pockets the phone mid-transmission —
+        // the fail-safe would be firing on the feature working.
+        if channelIDs.contains(where: { (appliedTalk[$0] ?? .off) != .off }) {
+            await forceDisconnectForUnstoppableMicrophone()
+        }
+    }
+
+    // MARK: - Background line
+
+    /// Re-decides which line the system holds, and says so when it moved.
+    private func refreshBackgroundLine() async {
+        guard let backgroundTalk else { return }
+
+        let candidates = configuration.channels.map {
+            BackgroundTalkLine.Candidate(
+                id: $0.id,
+                name: $0.name,
+                role: $0.role,
+                canTalk: $0.canTalk,
+                isListening: $0.isListening,
+                isPrivate: $0.isPrivate
+            )
+        }
+        let selection = BackgroundTalkLine.select(
+            from: candidates,
+            operatorChoice: operatorBackgroundChoice
+        )
+        guard selection != backgroundLine else { return }
+        backgroundLine = selection
+
+        if let lost = selection.lostOperatorChoice {
+            // The operator's pick is kept, not cleared: if the server grants
+            // talk back, the line they chose should return without them having
+            // to notice it ever went.
+            backgroundLineWarning = Self.warning(for: lost, replacedBy: selection.channelID.flatMap(channelName))
+            events.record(.backgroundLineLost, severity: .warning, detail: backgroundLineWarning)
+        }
+
+        if let id = selection.channelID, let name = channelName(id) {
+            await backgroundTalk.join(channelID: id, name: name)
+        } else {
+            isSystemTransmitting = false
+            await backgroundTalk.leave()
+        }
+    }
+
+    private static func warning(for lost: BackgroundTalkLine.LostChoice, replacedBy: String?) -> String {
+        let replacement = replacedBy.map { "Mostantól a(z) „\($0)” vonalon szólalhatsz meg." }
+            ?? "Jelenleg EGYETLEN vonalon sem tudsz megszólalni lezárt képernyőn."
+        switch lost {
+        case .removed:
+            return "A háttérvonalnak választott csatorna megszűnt. " + replacement
+        case let .noLongerTalkable(name):
+            return "A(z) „\(name)” vonalon a szerver visszavonta a beszéd jogát. " + replacement
+        case let .becamePrivate(name):
+            return "A(z) „\(name)” privát hívás lett, azt nem tartjuk háttérvonalként. " + replacement
+        }
+    }
+
+    private func releaseBackgroundLine() async {
+        guard let backgroundTalk else { return }
+        isSystemTransmitting = false
+        backgroundLine = nil
+        await backgroundTalk.leave()
+    }
+
+    private func apply(_ event: BackgroundTalkEvent) async {
+        switch event {
+        case let .joined(channelID, wasRestored):
+            events.record(
+                .backgroundLineHeld,
+                detail: wasRestored ? "visszaállítva" : channelName(channelID)
+            )
+
+        case let .left(channelID, wasOurDecision):
+            isSystemTransmitting = false
+            guard !wasOurDecision else { return }
+            // The system or the user took the line. Nothing on our screen would
+            // show that, so it has to be said: the pocket just went quiet.
+            let name = channelName(channelID).map { "„\($0)”" } ?? "A háttérvonal"
+            backgroundLineWarning = "\(name) lekerült a rendszerről: lezárt képernyőn most nem tudsz megszólalni."
+            events.record(.backgroundLineLost, severity: .warning, detail: channelName(channelID))
+            backgroundLine = nil
+
+        case let .beganTransmitting(channelID, fromAccessoryButton):
+            isSystemTransmitting = true
+            if fromAccessoryButton {
+                events.record(.backgroundLineHeld, detail: "gombos adás")
+            }
+            requestTalking(true, channelID: channelID)
+
+        case let .endedTransmitting(channelID):
+            isSystemTransmitting = false
+            requestTalking(false, channelID: channelID)
+
+        case .audioSessionActivated, .audioSessionDeactivated:
+            // Ownership of the session while the system transmits is a separate,
+            // device-measured round: see the vault note. Recording nothing here
+            // is deliberate — a log line would suggest we had acted.
+            break
+
+        case let .unavailable(reason):
+            backgroundLineWarning = reason
+            events.record(.backgroundLineLost, severity: .warning, detail: reason)
+
+        case let .unsupported(reason):
+            // Logged, not warned about. The line simply does not exist on this
+            // build, and the screen says so by showing no background line at
+            // all rather than by raising an alarm the operator cannot act on.
+            backgroundLine = nil
+            events.record(.backgroundLineLost, detail: reason)
+        }
+    }
+
+    /// The name of the line the system holds, or nil when it holds none.
+    var backgroundLineName: String? {
+        backgroundLine?.channelID.flatMap(channelName)
+    }
+
+    /// Clears a background-line warning the operator has read.
+    func dismissBackgroundLineWarning() {
+        backgroundLineWarning = nil
+    }
+
+    /// Lets the operator nominate the background line themselves.
+    func chooseBackgroundLine(_ channelID: UUID?) async {
+        operatorBackgroundChoice = channelID
+        backgroundLineWarning = nil
+        await refreshBackgroundLine()
     }
 
     private func stopTalkingEverywhere() async {
