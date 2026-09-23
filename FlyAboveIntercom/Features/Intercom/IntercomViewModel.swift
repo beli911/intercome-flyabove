@@ -881,6 +881,10 @@ final class IntercomViewModel: ObservableObject {
     private func apply(_ event: BackgroundTalkEvent) async {
         switch event {
         case let .joined(channelID, wasRestored):
+            // A vonal él, tehát egy korábbi „nem tudsz megszólalni” üzenet már
+            // nem igaz. Egy figyelmeztetés, ami tovább áll a képernyőn, mint
+            // ameddig érvényes, ugyanúgy félrevezet, mint a hiányzó.
+            backgroundLineWarning = nil
             events.record(
                 .backgroundLineHeld,
                 detail: wasRestored ? "visszaállítva" : channelName(channelID)

@@ -888,6 +888,27 @@ final class IntercomViewModelTests: XCTestCase {
         XCTAssertNil(subject.backgroundLine)
     }
 
+    func testASuccessfulJoinClearsAWarningThatIsNoLongerTrue() async {
+        let ptt = BackgroundTalkSpy()
+        let subject = IntercomViewModel(
+            transport: TransportSpy(),
+            audioSession: AudioSessionSpy(permissionGranted: true),
+            backgroundTalk: ptt
+        )
+        await subject.connect()
+        await waitUntil { ptt.joined.count == 1 }
+        let line = try! XCTUnwrap(subject.backgroundLine?.channelID)
+
+        await ptt.emit(.left(channelID: line, wasOurDecision: false))
+        await waitUntil { subject.backgroundLineWarning != nil }
+
+        await ptt.emit(.joined(channelID: line, wasRestored: false))
+
+        // Egy figyelmeztetés, ami tovább áll a képernyőn, mint ameddig
+        // érvényes, ugyanúgy félrevezet, mint a hiányzó: a vonal él.
+        await waitUntil { subject.backgroundLineWarning == nil }
+    }
+
     // MARK: - Audio session ownership
 
     func testTheDefaultModeNeverSuppressesTheAudioSession() async {

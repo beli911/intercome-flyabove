@@ -57,6 +57,15 @@ final class PushToTalkService: NSObject, BackgroundTalkControlling {
     /// Set while we are the ones leaving, so the delegate can tell our own
     /// `leave()` apart from the system or the user taking the line away.
     private var isLeavingOnPurpose = false
+    /// A csatorna, amire épp csatlakozási kérés van kint.
+    ///
+    /// Mérve egy valódi telefonon: a rendszer a csatlakozás ELŐTT elengedi az
+    /// előző futásból visszaállított vonalat, és erről `didLeaveChannel`-lel
+    /// szól — 8 ms-mal a kérésünk után, 5 ms-mal a sikeres csatlakozás előtt.
+    /// Ez a kézfogás része, NEM elvesztés; enélkül a felület hamis
+    /// figyelmeztetést ír ki („lezárt képernyőn most nem tudsz megszólalni”),
+    /// és a háttér-mentesség is elveszne, mert a vonal nil-re állna.
+    private var pendingJoin: UUID?
     private var continuations: [UUID: AsyncStream<BackgroundTalkEvent>.Continuation] = [:]
 
     private(set) var isSupported = false
@@ -98,6 +107,7 @@ final class PushToTalkService: NSObject, BackgroundTalkControlling {
             manager.leaveChannel(channelUUID: heldChannel)
         }
         heldChannel = channelID
+        pendingJoin = channelID
         manager.requestJoinChannel(
             channelUUID: channelID,
             descriptor: PTChannelDescriptor(name: name, image: nil)
@@ -106,6 +116,7 @@ final class PushToTalkService: NSObject, BackgroundTalkControlling {
 
     func leave() async {
         guard let manager, let heldChannel else { return }
+        pendingJoin = nil
         isLeavingOnPurpose = true
         manager.leaveChannel(channelUUID: heldChannel)
         self.heldChannel = nil
@@ -143,6 +154,7 @@ extension PushToTalkService: PTChannelManagerDelegate {
     ) {
         let restored = reason == .channelRestoration
         Task { @MainActor in
+            self.pendingJoin = nil
             self.heldChannel = channelUUID
             // Half duplex: an intercom line where two people talk over each
             // other is worse than one that makes them take turns, and it is
@@ -161,6 +173,12 @@ extension PushToTalkService: PTChannelManagerDelegate {
         reason: PTChannelLeaveReason
     ) {
         Task { @MainActor in
+            // A kézfogás közbeni elengedés nem elvesztés. Kimondva naplózzuk,
+            // hogy ne tűnjön el nyomtalanul — csak nem riasztunk rá.
+            if self.pendingJoin == channelUUID {
+                FlycomDiagnostics.log("[PTT] (kézfogás) a rendszer elengedte a korábbi vonalat, csatlakozás folyamatban")
+                return
+            }
             let ours = self.isLeavingOnPurpose
             self.isLeavingOnPurpose = false
             if self.heldChannel == channelUUID { self.heldChannel = nil }
