@@ -197,7 +197,8 @@ folyamat magától visszajöjjön.
 |---|---|
 | `server/Dockerfile` | az API konténere (Alpine, nem-root felhasználó) |
 | `deployment/docker-compose.yml` | Caddy + API, `restart: always`, névvel ellátott kötetek |
-| `deployment/Caddyfile` | TLS-termináció, automatikus Let's Encrypt |
+| `deployment/Caddyfile` | TLS-termináció, automatikus Let's Encrypt (API + médiajelzés) |
+| `deployment/livekit.yaml` | a médiaszerver konfigja — **a v1.13.6-os binárissal validálva** |
 | `deployment/env.production.example` | a kötelező környezeti változók, magyarázattal |
 | `scripts/verify-production-stack.sh` | deploy UTÁN megméri, hogy tényleg áll-e |
 
@@ -226,21 +227,41 @@ kontrollal mindegyikre:
 A szerver tehát nem indul el félkészen — ez szándékos, és ezért nincs a
 compose-ban egyetlen olyan változó sem, amit ne olvasna valami.
 
-### 🔴 A TURN, amit a TLS nem vált ki
+### A médiaszerver: saját, és ezért nincs perc-plafon
 
-Mobilhálózaton (Telekom/Yettel/Vodafone) a telefonok **szimmetrikus NAT** mögött
-vannak: nem látnak rá egymásra, tehát a közvetlen WebRTC-út nem épül fel. A
-STUN ehhez kevés — **relé kell**.
+A compose alapból **saját `livekit-server`-t** futtat ugyanazon a gépen. Az ok
+mérés, nem ízlés: a LiveKit Cloud ingyenes („Build") csomagja **5 000 WebRTC
+percet** ad havonta, és ezt **résztvevőnként** számolja. Egy 6 fős stáb egyetlen
+8 órás forgatási napja 6 × 480 = **2 880 perc** — a havi keret tehát nagyjából
+**másfél forgatási nap**. 🔴 És a túllépés **kemény plafon**: az új kérések
+elbuknak, nem számláznak, vagyis forgatás közben nem enged be senkit.
 
-- **LiveKit Cloud:** a TURN benne van, nincs vele üzemeltetési teendő.
-- **Saját `livekit-server`:** mérve az 1.13.6-os binárison, **van beépített
-  TURN-je** (`--turn-cert` / `--turn-key`) — tehát **külön `coturn` NEM kell**.
-  Cserébe a TURN tanúsítványa és a 3478/5349 portok a te dolgod.
+Mivel az API-nak amúgy is kell egy publikus gép, a médiaszerver ráültetése
+**nem kerül külön pénzbe**, és nincs rajta korlát.
 
-⛔ **Ezt egyik ellenőrzés sem tudja helyetted eldönteni:** hogy a hang átjön-e
-mobilhálózaton, **kizárólag két valódi telefon mondja meg, két külön
-szolgáltatón**. A `verify-production-stack.sh` ezt ki is mondja, ahelyett hogy
-zölddel elfedné.
+### ⚠️ TURN: NEM kell — és a szokásos érvelés itt nem áll
+
+Elterjedt állítás, hogy mobilhálózaton TURN nélkül „nem jön át a hang". Ez
+**peer-to-peer WebRTC-re igaz, nem SFU-ra**. A LiveKit SFU: a telefon **kifelé**
+hív egy publikus szervert, és ezt a szolgáltatói CGNAT nem akadályozza.
+
+A LiveKit saját doksija a TURN-portokat kifejezetten **„(optional)"**-ként
+jelöli, és az **ICE/TCP 7881**-et nevezi meg tartaléknak arra az esetre, *„when
+the client could not connect via UDP (e.g. VPN, corporate firewalls)"*. Ezért
+nincs a stackben sem `coturn`, sem TURN-tanúsítvány.
+
+**Amit viszont ki kell nyitni a tűzfalon:**
+
+| Port | Mire |
+|---|---|
+| 80, 443 TCP | Caddy — TLS, és a `wss://` médiajelzés |
+| **7882 UDP** | a normál médiaút (egyetlen port, UDP-mux — nem 50000–60000) |
+| **7881 TCP** | tartalék, ahol az UDP tiltott |
+
+⛔ **Amit semmilyen ellenőrzés nem dönt el helyetted:** hogy a hang átjön-e
+mobilhálózaton. Azt **két valódi telefon mondja meg, két külön szolgáltatón**. A
+`verify-production-stack.sh` ezt ki is mondja, ahelyett hogy zölddel elfedné —
+ahogy az UDP-portról is, amit kívülről nem lehet becsületesen ellenőrizni.
 
 ### Adatmentés
 

@@ -1,0 +1,25 @@
+# Saját LiveKit — a médiaszerver, ami mellett nincs perc-plafon és nincs havi
+# médiaszámla. Ugyanazon a gépen fut, mint az API, tehát nem kerül külön pénzbe.
+
+port: 7880
+
+rtc:
+  # Egyetlen UDP port, nem 50000–60000. A gyári tartomány önmagában helyes, de
+  # Dockerben tízezer port kipublikálása lassú indulást és memória-pazarlást
+  # okoz — az UDP-mux ugyanazt tudja egy porton.
+  udp_port: 7882
+  # Tartalék azoknak a hálózatoknak, ahol az UDP tiltott (helyszíni céges
+  # Wi-Fi, VPN). A LiveKit saját doksija ezt nevezi meg tartalékként — és
+  # ezért NEM kell külön TURN-szerver: a telefon kifelé hív egy publikus
+  # címet, amit a mobilszolgáltatók CGNAT-ja nem akadályoz.
+  tcp_port: 7881
+  # A konténer a saját belső címét látja. E nélkül azt hirdetné a telefonoknak,
+  # és a média sehova nem érkezne meg.
+  use_external_ip: true
+
+logging:
+  level: info
+
+# A kulcs és a titok SZÁNDÉKOSAN nincs ebben a fájlban: a `LIVEKIT_KEYS`
+# környezeti változóból jön, ugyanabból a két értékből, amit az API is használ.
+# Így nincs második igazság-forrás, és a titok nem kerül verziókövetésbe.

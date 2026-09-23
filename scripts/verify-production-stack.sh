@@ -101,9 +101,19 @@ else
   else
     bad "a médiajelzés címe nem elérhető ($LKHOST:$LKPORT)"
   fi
-  # ⚠️ A TURN-relét ez NEM méri. Hogy mobilhálózaton (CGNAT) átjön-e a hang,
-  #    kizárólag két valódi telefon mondja meg, két külön szolgáltatón.
-  skip "a TURN-relé NINCS mérve — ez csak két valódi telefonnal, két hálózaton dől el"
+  # A jelzés TLS-en megy, a MÉDIA nem: az a 7882/UDP (illetve tartalékként a
+  # 7881/TCP) porton érkezik közvetlenül. Egy zárt tűzfal itt némít el egy
+  # egyébként tökéletesen "zöld" telepítést — ezért külön ellenőrzés.
+  if nc -z -G 5 "$LKHOST" 7881 2>/dev/null || nc -z -w 5 "$LKHOST" 7881 2>/dev/null; then
+    ok "a média tartalék-útja nyitva (7881/TCP)"
+  else
+    bad "a 7881/TCP zárva — UDP-tiltó hálózaton (céges Wi-Fi, VPN) nem lesz hang"
+  fi
+  # ⚠️ Az UDP-t szándékosan NEM "ellenőrizzük": kapcsolat nélküli protokoll,
+  #    a `nc -zu` nyitottnak jelent egy zárt portot is. Egy hamis zöld itt
+  #    rosszabb, mint a hiánya.
+  skip "a 7882/UDP (a normál médiaút) nem ellenőrizhető kívülről — valódi hívás dönti el"
+  skip "a mobilhálózati működés NINCS mérve — ezt két valódi telefon mondja meg, két külön szolgáltatón"
 fi
 
 # 4. A teljes API-szerződés, ha van kihez bejelentkezni.

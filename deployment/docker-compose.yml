@@ -15,8 +15,9 @@ services:
       - "80:80"
       - "443:443"
     environment:
-      # A Caddyfile ezt olvassa; enélkül a tanúsítvány a rossz névre szólna.
+      # A Caddyfile ezeket olvassa; enélkül a tanúsítvány a rossz névre szólna.
       FLYCOM_API_DOMAIN: ${FLYCOM_API_DOMAIN:?a FLYCOM_API_DOMAIN kotelezo}
+      FLYCOM_LIVEKIT_DOMAIN: ${FLYCOM_LIVEKIT_DOMAIN:?a FLYCOM_LIVEKIT_DOMAIN kotelezo}
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       # A megszerzett tanúsítvány ide kerül. Kötet nélkül minden újraindítás új
@@ -25,6 +26,7 @@ services:
       - caddy_config:/config
     depends_on:
       - flycom-api
+      - livekit
 
   flycom-api:
     build:
@@ -53,6 +55,25 @@ services:
       LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET:?a LIVEKIT_API_SECRET kotelezo}
     volumes:
       - flycom_db:/var/lib/flycom
+
+  # A médiaszerver. Saját gépen fut, tehát nincs perc-plafon és nincs havi
+  # médiaszámla — a LiveKit Cloud ingyenes csomagja 5000 résztvevő-percnél
+  # KEMÉNY plafonba fut, ami egy 6 fős stábnak másfél forgatási nap.
+  livekit:
+    image: livekit/livekit-server:v1.13.6
+    restart: always
+    command: ["--config", "/etc/livekit.yaml"]
+    ports:
+      # A jelzés (7880) NINCS kipublikálva: azt a Caddy adja ki TLS-sel.
+      # Ez a kettő viszont maga a média, és közvetlenül kell a telefonoknak.
+      - "7881:7881/tcp"   # ICE/TCP — tartalék, ahol az UDP tiltott
+      - "7882:7882/udp"   # ICE/UDP mux — a normál médiaút
+    environment:
+      # Ugyanaz a két érték, amit az API is használ: nincs második
+      # igazság-forrás, és a titok nem kerül a konfigurációs fájlba.
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?a LIVEKIT_API_KEY kotelezo}: ${LIVEKIT_API_SECRET:?a LIVEKIT_API_SECRET kotelezo}"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
 
 volumes:
   caddy_data:
