@@ -121,6 +121,14 @@ final class PushToTalkService: NSObject, BackgroundTalkControlling {
     }
 
     private func emit(_ event: BackgroundTalkEvent) {
+        // Szándékosan `print`, és szándékosan NEM `#if DEBUG`.
+        //
+        // A rendszer-keretrendszerek és a LiveKit az egységesített naplóba
+        // írnak, ami egy csatlakoztatott telefonról nem streamelhető — ezért a
+        // `--console` figyelő gyakorlatilag vak volt. Ez a sor a stdout-ra megy,
+        // tehát látszik. És azért marad Release-ben is, mert egy diagnosztika,
+        // ami pont a terepi buildből tűnik el, akkor hiányzik, amikor kell.
+        print("[Flycom][PTT] \(event)")
         for continuation in continuations.values { continuation.yield(event) }
     }
 }
