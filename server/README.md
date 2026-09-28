@@ -147,7 +147,23 @@ akit senki nem hívott meg. Két út van:
 
 1. **Meghívó**: a supervisor vagy admin kiad egy kódot az appból, a kolléga
    beírja vagy beolvassa a QR-t.
-2. **Kézzel**, első adminnak:
+2. **Az admin paranccsal** (első admin, produkció, további felhasználók):
+
+```bash
+docker compose exec flycom-api node scripts/admin.js setup \
+  --email admin@flyabove.hu --name "Admin" --production "Flycom"
+docker compose exec flycom-api node scripts/admin.js add-user \
+  --email kamera@flyabove.hu --name "Kamera 1" --production "Flycom" --role operator
+```
+
+   ⚠️ **A meghívó csak MEGLÉVŐ fiókot visz be** (a beváltáshoz be kell
+   jelentkezni), tehát új kolléga fiókja is ezzel készül. Az alábbi kézi
+   `sqlite3` út a **konténerben nem járható** (a képben nincs `sqlite3`), és
+   produkciót, vonalakat, jogosultságot sem hoz létre — az API-n pedig nincs
+   produkció-létrehozás, tehát e nélkül egy friss szerver üres.
+   Részletek: `deployment/README.md`.
+
+   Régi, kézi út (csak konténeren kívül):
 
 ```bash
 npm run hash                              # jelszó bekérése, echo nélkül

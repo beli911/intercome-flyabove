@@ -16,6 +16,9 @@ ENV NODE_ENV=production
 COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY src/ ./src/
+# Az admin parancs (produkció, első admin, felhasználók) a szerveren BELÜL fut:
+# az API-n nincs regisztráció és produkció-létrehozás, és a képben nincs sqlite3.
+COPY scripts/ ./scripts/
 
 # Az adat a konténeren KÍVÜL él (compose-kötet). A könyvtárat azért kell
 # létrehozni és átadni, mert az SQLite WAL módban a `.db` mellé `-wal` és `-shm`

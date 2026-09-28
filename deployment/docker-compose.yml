@@ -7,6 +7,11 @@
 # A `version:` kulcs szándékosan hiányzik: a mai Docker Compose elavultnak
 # jelzi, és semmit nem befolyásol.
 
+# Rögzített projektnév: enélkül a kötetek neve a MAPPA nevéből jönne
+# (`deployment_flycom_db`), és egy más mappába telepített példány némán ÜRES
+# adatbázissal indulna. A data.sh is erre a névre hivatkozik.
+name: flycom
+
 services:
   caddy:
     image: caddy:2-alpine
