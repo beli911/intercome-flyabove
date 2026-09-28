@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>com.apple.developer.push-to-talk</key>
+	<true/>
+	<!-- A Push to Talk keretrendszer ezt IS megköveteli, és ha hiányzik, a
+	     PTChannelManager létre sem jön: "Push-to-Talk API requires enabling the
+	     Push Notifications capability". A felületen ez csak annyi lenne, hogy
+	     nincs háttérvonal — az ok a készülék naplójában van.
+	     Az érték konfigurációnként más (fejlesztés/éles), ezért build-beállítás. -->
+	<key>aps-environment</key>
+	<string>$(APS_ENVIRONMENT)</string>
+</dict>
+</plist>

@@ -1,0 +1,14 @@
+# Egyetlen dolga: TLS-t tenni a Flycom API elé.
+#
+# A Caddy beépített ACME-klienssel kéri és újítja a Let's Encrypt tanúsítványt,
+# tehát nincs külön certbot és nincs lejáró tanúsítvány miatti néma kiesés.
+# A Node folyamat a konténer-hálózaton belül marad, kívülről nem elérhető.
+{$FLYCOM_API_DOMAIN} {
+	reverse_proxy flycom-api:8080
+}
+
+# A médiajelzés TLS-e. A telefon ide csatlakozik `wss://`-sel; a média maga NEM
+# ezen megy, hanem közvetlenül a 7882/UDP (illetve 7881/TCP) porton.
+{$FLYCOM_LIVEKIT_DOMAIN} {
+	reverse_proxy livekit:7880
+}

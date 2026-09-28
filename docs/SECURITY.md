@@ -4,7 +4,9 @@
 
 - HTTPS/WSS signaling és DTLS-SRTP média
 - rövid életű hozzáférési token
-- token tárolása iOS Keychainben
+- token tárolása iOS Keychainben — megvalósítva:
+  `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`, hogy zárolt kijelzőnél is
+  működjön az újracsatlakozás, de backuppal ne kerüljön másik eszközre
 - szerveroldali produkció-, csatorna-, Talk- és Listen-jogosultság
 - rate limiting és brute-force védelem
 - TURN TLS hitelesítéssel; statikus publikus TURN jelszó tilos
@@ -22,6 +24,26 @@ felengedése és a bontás azonnal tiltsa le a küldött mikrofon tracket.
 Engedélyezett: session ID, hibakód, kapcsolatállapot, jitter/packet loss aggregátum.
 Alapértelmezésben tiltott: nyers audio, access token, TURN credential, teljes név
 és IP-cím hosszú távú megőrzése.
+
+## Eseménynapló
+
+A kliens vezet egy munkamenet-naplót (MONITOR fül). Ez szándékosan a fenti
+engedélyezett körre szorítkozik: kapcsolatállapotok, hibakódok, csatornanevek,
+hangútvonal és minőségi számok. Nem tartalmaz hangot, tokent, TURN
+hitelesítést és IP-címet.
+
+Korlátos (alapból 200 bejegyzés), csak a memóriában él, és a munkamenettel
+együtt elvész. Lemezre írni külön megőrzési kérdés, amit még senki nem
+válaszolt meg — addig nem írjuk le.
+
+## Kliensoldali állapot (M1)
+
+- `AuthService`: egyszerre egy token-frissítés; `401`-re a munkamenet törlődik,
+  átmeneti szerverhibára megmarad.
+- A Talk gomb kényszerű elengedése interruption, eszközleválasztás,
+  újracsatlakozás és szerveroldali jogvesztés esetén.
+- A csatornajogosultság a felületen csak kényelmi jelzés; a kikényszerítés a
+  szerver által kiadott LiveKit tokenben történik.
 
 ## Nyitott feladatok
 

@@ -1,0 +1,5 @@
+# A kitöltött éles konfiguráció itt él, és soha nem kerül gitbe.
+# A sablon (env.production.example) követett, az értékek nem.
+.env
+.env.*
+!env.production.example

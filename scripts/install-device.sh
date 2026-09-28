@@ -1,0 +1,148 @@
+#!/bin/bash
+#
+# Builds and installs on the connected iPhone, pointed at the dev server on this
+# machine's LAN address.
+#
+# The address is detected rather than hardcoded: it changes with the network,
+# and a stale one fails as "server unreachable" on the phone, which looks like
+# an app bug rather than a configuration one.
+#
+# Prerequisites, both of which need you and not the build:
+#   1. Xcode → Settings → Accounts: the Apple ID session must be valid.
+#   2. The iPhone connected, unlocked, and trusting this Mac.
+#
+# Usage:
+#   scripts/install-device.sh [device-udid]
+#       a gép LAN-címére mutató fejlesztői build (alapértelmezés)
+#   scripts/install-device.sh --base-url https://api.intercom.flyabove.hu/ [--release]
+#       ÉLES build, ami mobilhálózaton is eléri a szervert
+#
+# A `--base-url` nélküli alapértelmezés SZÁNDÉKOSAN a LAN-cím, de terepi
+# próbához az kevés: a telefon 5G-n nem látja a gép belső címét, és egy Release
+# build ráadásul el is utasítja a `http://`-t. Ezért kell a kapcsoló — a
+# konfiguráció build-beállítás (`FLYABOVE_API_BASE_URL`), nem az Info.plist
+# kézi szerkesztése.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+BASE_URL=""
+CONFIGURATION="Debug"
+DEVICE=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --base-url) BASE_URL="$2"; shift 2 ;;
+    --release) CONFIGURATION="Release"; shift ;;
+    # A tartomány a fenti "# Usage:" blokk. Ha a fejléc hossza változik, ezt
+    # is igazítani kell — ezért van a súgó végén egy ellenőrizhető sor.
+    -h|--help) sed -n '14,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -*) echo "Ismeretlen kapcsoló: $1" >&2; exit 2 ;;
+    *) DEVICE="$1"; shift ;;
+  esac
+done
+
+IP=""
+if [ -z "$BASE_URL" ]; then
+  IP=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+  if [ -z "$IP" ]; then
+    echo "Nincs LAN-cím. Wi-Fi? (Vagy adj meg --base-url címet.)" >&2
+    exit 1
+  fi
+  BASE_URL="http://$IP:8080/"
+fi
+
+# Parsed from JSON, not from the table: the column layout shifts with device
+# names, and picking the wrong field silently builds for a device id that does
+# not exist.
+if [ -z "$DEVICE" ]; then
+  JSON=$(mktemp)
+  xcrun devicectl list devices --json-output "$JSON" >/dev/null 2>&1 || true
+  DEVICE=$(python3 - "$JSON" <<'PY'
+import json, sys
+try:
+    devices = json.load(open(sys.argv[1]))["result"]["devices"]
+except Exception:
+    sys.exit(0)
+for device in devices:
+    hardware = device.get("hardwareProperties", {})
+    connection = device.get("connectionProperties", {})
+    platform = (hardware.get("platform") or "").lower()
+    if platform != "ios":
+        continue
+    if connection.get("pairingState") != "paired":
+        continue
+    if connection.get("tunnelState") in ("unavailable", None):
+        continue
+    print(hardware.get("udid", ""))
+    break
+PY
+)
+fi
+
+if [ -z "$DEVICE" ]; then
+  echo "Nincs használható iPhone." >&2
+  echo >&2
+  echo "Ellenőrizd:" >&2
+  echo "  - a telefon kábellel csatlakozik és fel van oldva;" >&2
+  echo "  - Xcode → Window → Devices and Simulators: a telefon párosítva van;" >&2
+  echo "  - a telefonon elfogadtad a 'Trust This Computer?' kérdést." >&2
+  echo >&2
+  echo "Jelenlegi állapot:" >&2
+  xcrun devicectl list devices >&2
+  exit 1
+fi
+
+# Xcode knows the team once the Apple ID is signed in; reading it here beats
+# hardcoding one that may belong to a different account.
+TEAM="${FLYABOVE_DEVELOPMENT_TEAM:-}"
+if [ -z "$TEAM" ]; then
+  TEAM=$(defaults read com.apple.dt.Xcode IDEProvisioningTeams 2>/dev/null \
+    | grep -oE '"teamID" = "[^"]+"' | head -1 | cut -d'"' -f4 || true)
+fi
+# Tartalék: az aláíró tanúsítványból.
+#
+# A Team ID az `OU` mező — NEM a `find-identity` kiírásában zárójelben álló
+# érték, az a tanúsítványé. Ezt a projekt már egyszer megégette (2026-08-27), és
+# a tünet nem "hiányzik a csapat", hanem egy érvénytelen azonosítóval elhasaló
+# aláírás, ami sokkal nehezebben olvasható.
+if [ -z "$TEAM" ]; then
+  CERT_NAME=$(security find-identity -p codesigning -v 2>/dev/null \
+    | grep -m1 '"Apple Develop' | sed 's/.*"\(.*\)".*/\1/' || true)
+  if [ -n "$CERT_NAME" ]; then
+    TEAM=$(security find-certificate -c "$CERT_NAME" -p 2>/dev/null \
+      | openssl x509 -noout -subject 2>/dev/null \
+      | tr ',' '\n' | sed -n 's/.*OU=\([A-Z0-9]*\).*/\1/p' | head -1 || true)
+  fi
+fi
+
+echo "Eszköz: $DEVICE"
+echo "API:    $BASE_URL"
+echo "Build:  $CONFIGURATION"
+echo "Csapat: ${TEAM:-(Xcode válassza)}"
+echo
+
+# Csak a LAN-os alapértelmezésnél van értelme: egy éles címnél a szerver
+# ellenőrzése a verify-production-stack.sh dolga.
+if [ -n "$IP" ] && ! curl -s -o /dev/null --max-time 3 "http://$IP:8080/v1/productions"; then
+  echo "Figyelem: a dev API nem válaszol a $IP:8080 címen." >&2
+  echo "Indítsd el: livekit-server --dev --bind 0.0.0.0" >&2
+  echo "         és: cd server && SEED_DEMO=1 DATABASE_PATH=:memory: LIVEKIT_URL=ws://$IP:7880 npm start" >&2
+fi
+
+DERIVED=$(mktemp -d)
+xcodebuild build \
+  -project FlyAboveIntercom.xcodeproj \
+  -scheme FlyAboveIntercom \
+  -destination "platform=iOS,id=$DEVICE" \
+  -configuration "$CONFIGURATION" \
+  -derivedDataPath "$DERIVED" \
+  -allowProvisioningUpdates \
+  -allowProvisioningDeviceRegistration \
+  FLYABOVE_API_BASE_URL="$BASE_URL" \
+  ${TEAM:+FLYABOVE_DEVELOPMENT_TEAM="$TEAM"}
+
+APP=$(find "$DERIVED/Build/Products" -maxdepth 2 -name "FlyAboveIntercom.app" | head -1)
+echo
+echo "Telepítés: $APP"
+xcrun devicectl device install app --device "$DEVICE" "$APP"
+xcrun devicectl device process launch --device "$DEVICE" hu.flyabove.intercom
